@@ -3,15 +3,27 @@ import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import { ChunkLoadErrorHandler } from '@/components/chunk-load-error-handler'
 
+// Next.js setzt den basePath (GitHub Pages: /zuglotse) nicht automatisch vor Icon-URLs
+// in den Metadaten. Ohne Präfix zeigen die Links auf die Domain-Wurzel und iOS lädt dort
+// ein fremdes apple-touch-icon. ?v= erzwingt das Neuladen gecachter Icons.
+const base = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
+const ICON_VERSION = '2'
+const asset = (path: string) => `${base}${path}?v=${ICON_VERSION}`
+
 export const metadata = {
   title: 'Zuglotse – Dein Schachkompass',
   applicationName: 'Zuglotse',
   description: 'Dein nächster Zug. Klar vor Augen. Analysiere Schachstellungen mit Stockfish – ohne KI, API-Schlüssel oder Registrierung.',
   icons: {
-    icon: '/favicon.svg',
-    shortcut: '/favicon.svg',
+    icon: [
+      { url: asset('/favicon.svg'), type: 'image/svg+xml' },
+      { url: asset('/icon-192.png'), type: 'image/png', sizes: '192x192' },
+    ],
+    shortcut: asset('/favicon.svg'),
+    apple: [{ url: asset('/apple-touch-icon.png'), sizes: '180x180', type: 'image/png' }],
   },
-  appleWebApp: { title: 'Zuglotse' },
+  manifest: asset('/manifest.webmanifest'),
+  appleWebApp: { title: 'Zuglotse', capable: true, statusBarStyle: 'default' },
   openGraph: {
     title: 'Zuglotse – Dein Schachkompass',
     description: 'Stellung aufbauen. Beste Züge entdecken. Schach besser verstehen – mit Stockfish und deutschen Erklärungen.',

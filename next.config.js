@@ -11,6 +11,9 @@ const nextConfig = {
   basePath: basePath || undefined,
   assetPrefix: basePath || undefined,
   trailingSlash: true,
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath || '',
+  },
   images: { unoptimized: true },
   typescript: {
     ignoreBuildErrors: true,
