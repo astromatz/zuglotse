@@ -15,9 +15,6 @@ const nextConfig = {
     NEXT_PUBLIC_BASE_PATH: basePath || '',
   },
   images: { unoptimized: true },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   webpack: (config) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,

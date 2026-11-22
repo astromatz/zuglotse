@@ -11,9 +11,9 @@
 
 ## 🚀 Hosting auf GitHub Pages
 
-Die Webapp ist vollständig für das Hosting auf **GitHub Pages** vorbereitet. Du hast zwei einfache Möglichkeiten zur Veröffentlichung:
+Die Webapp ist vollständig für das Hosting auf **GitHub Pages** vorbereitet. Die Veröffentlichung läuft über GitHub Actions:
 
-### Option 1: Automatische Bereitstellung via GitHub Actions (Empfohlen)
+### Automatische Bereitstellung via GitHub Actions
 
 Mit dieser Methode baut GitHub deine Webapp bei jedem Commit/Push automatisch und passt den Pfad (`basePath`) automatisch an deinen Repository-Namen an.
 
@@ -38,21 +38,6 @@ Mit dieser Methode baut GitHub deine Webapp bei jedem Commit/Push automatisch un
 
 ---
 
-### Option 2: Sofortige Bereitstellung über den `docs/`-Ordner (Ohne GitHub Actions)
-
-Im Unterordner `docs/` befindet sich bereits ein **fertig gebauter, sofort einsatzbereiter statischer Export** der Webapp (inklusive `.nojekyll`, Stockfish WebAssembly, Schriften und Styles).
-
-1. Pushe das Repository zu GitHub (wie in Option 1).
-2. Gehe in deinem GitHub-Repository auf **Settings** -> **Pages**.
-3. Wähle unter **Build and deployment > Source**:
-   * **Deploy from a branch**
-   * Branch: `main` (oder `master`)
-   * Ordner: **/docs**
-4. Klicke auf **Save**. Die Webapp ist sofort live!
-
-> **Tipp für Sub-Pfade bei Option 2:** Falls dein Repository unter `https://<nutzer>.github.io/<repo>/` liegt, wird Option 1 empfohlen, da GitHub Actions den Basis-Pfad automatisch zur Build-Zeit setzt. Bei einer eigenen Domain (z. B. `zuglotse.de`) funktioniert Option 2 direkt ohne Anpassungen.
-
----
 
 ## 🛠️ Lokale Entwicklung & Build
 
@@ -71,10 +56,7 @@ npm run build
 # Der fertige statische Build liegt anschließend im Ordner /out
 ```
 
-Alternativ kannst du den bereits gebauten `docs/`-Ordner direkt mit jedem statischen HTTP-Server testen:
-```bash
-npx serve docs
-```
+Den statischen Build kannst du lokal mit `npx serve out` testen.
 
 ---
 
@@ -87,18 +69,20 @@ Webapp/
 │       └── deploy.yml        # Automatischer GitHub-Pages-Deploy-Workflow
 ├── app/
 │   ├── _components/          # Haupt-UI (Brett, Sheets, Steuerung, Dialoge)
+│   ├── fonts/                # Schachsymbol-Schriftart (wird mitgebündelt)
 │   ├── globals.css           # Tailwind-Farben, Tokens, Schriften
 │   ├── layout.tsx            # HTML-Grundgerüst & Metadaten
+│   ├── manifest.ts           # Web-App-Manifest (Homescreen)
 │   ├── opengraph-image.tsx   # Statisches OpenGraph Social-Vorschaubild
 │   └── page.tsx              # Startseite
-├── components/               # UI-Komponenten (Radix, Lucide, Chess-Panels)
-├── docs/                     # Fertig kompilierter statischer Build für GitHub Pages
+├── components/               # UI-Komponenten (Chess-Panels, Button, Dialog)
 ├── hooks/                    # React Hooks (useStockfish, useHistory, etc.)
 ├── lib/                      # Schach-Logik, Stockfish-Worker, KI-Provider
 ├── public/
 │   ├── .nojekyll             # Verhindert, dass GitHub Pages _next/-Ordner ignoriert
 │   ├── favicon.svg           # Zuglotse-Kompass-Icon
-│   ├── fonts/                # Eingebettete Schachsymbol-Schriftart
+│   ├── apple-touch-icon.png  # Homescreen-Icon iOS
+│   ├── icon-192/512.png      # Icons fürs Web-Manifest
 │   ├── stockfish-lite.js     # Web-Worker für Stockfish
 │   └── stockfish-lite.wasm   # Kompiliertes WebAssembly-Modell
 ├── next.config.js            # Next.js Static-Export & BasePath-Konfiguration
@@ -112,6 +96,6 @@ Webapp/
 ## 🔒 Wichtige Besonderheiten für GitHub Pages
 
 1. **`.nojekyll` Datei:**
-   GitHub Pages führt standardmäßig die Jekyll-Engine aus. Da Next.js-Assets im Unterverzeichnis `_next/` liegen und Jekyll Ordner mit Unterstrich ignoriert, ist die Datei `.nojekyll` zwingend erforderlich und bereits in `public/` und `docs/` enthalten.
+   GitHub Pages führt standardmäßig die Jekyll-Engine aus. Da Next.js-Assets im Unterverzeichnis `_next/` liegen und Jekyll Ordner mit Unterstrich ignoriert, ist die Datei `.nojekyll` zwingend erforderlich und bereits in `public/` enthalten.
 2. **WebAssembly & Web Worker:**
    Stockfish wird als Web Worker geladen. Die Pfadermittlung in `hooks/useStockfish.ts` ermittelt die URL dynamisch zur Laufzeit, sodass die Engine sowohl auf der Domain-Wurzel als auch in Unterverzeichnissen (`/<repo-name>/`) fehlerfrei geladen wird.
