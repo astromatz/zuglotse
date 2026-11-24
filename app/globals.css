@@ -215,3 +215,30 @@ select.zl-input { width: auto; }
   html { scroll-behavior: auto; }
   .zuglotse-app *, .zuglotse-sheet { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Brett bleibt beim Scrollen sichtbar.
+   Handy hochkant: Brett als feste Leiste oben (Höhe begrenzt, groß oder kompakt).
+   Ab 768 px: zweispaltig, Brett klebt in der linken Spalte. */
+.zl-board-dock { position: sticky; top: 0; z-index: 30; }
+.zl-board-wrap { max-width: 100%; }
+@media (max-width: 767px) and (orientation: portrait) {
+  .zl-panel.zl-board-dock {
+    margin-inline: -1rem;
+    padding: 8px 1rem;
+    border-radius: 0;
+    background: hsl(var(--background));
+    box-shadow: 0 1px 0 hsl(var(--border)), 0 8px 20px hsl(var(--foreground) / 0.07);
+  }
+  .zl-board-wrap[data-size='large'] { max-width: max(220px, 42vh); max-width: max(220px, 42svh); }
+  .zl-board-wrap[data-size='compact'] { max-width: max(140px, 26vh); max-width: max(140px, 26svh); }
+}
+@media (min-width: 640px) and (max-width: 767px) and (orientation: portrait) {
+  .zl-panel.zl-board-dock { margin-inline: -2rem; padding-inline: 2rem; }
+}
+@media (max-width: 767px) and (orientation: landscape) {
+  .zl-board-dock { position: static; }
+}
+@media (min-width: 768px) {
+  .zl-board-dock { top: 6rem; z-index: auto; }
+  .zl-board-wrap { max-width: max(150px, calc(100vh - 250px)); max-width: max(150px, calc(100svh - 250px)); }
+}
