@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,6 +28,7 @@ import { Chess } from 'chess.js'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { validateFen } from '@/lib/chess-utils'
+import { principalVariation } from '@/lib/local-commentary'
 import { AI_KEY_STORAGE, PROVIDER_LABEL, imageToDataUrl, recognizeBoard, type AiSettings } from '@/lib/ai-providers'
 import { repairPosition, rowsToSquares } from '@/lib/position-repair'
 import { ClientOnly } from '@/components/client-only'
@@ -39,7 +40,7 @@ import { useStockfish } from '@/hooks/useStockfish'
 import { useAiExplanation } from '@/hooks/useAiExplanation'
 import { useHistory, type HistoryItem } from '@/hooks/useHistory'
 
-import { BoardPanel } from '@/components/chess/BoardPanel'
+import { BoardPanel, type BoardPreview } from '@/components/chess/BoardPanel'
 import { CandidateList } from '@/components/chess/CandidateList'
 import { VariationPanel } from '@/components/chess/VariationPanel'
 import { OpeningTutorPanel } from '@/components/chess/OpeningTutorPanel'
@@ -55,6 +56,8 @@ export default function ChessApp() {
   const [step, setStep] = useState<Step>('start')
   const [depth, setDepth] = useState(18)
   const [boardWidth, setBoardWidth] = useState(350)
+  const [boardSize, setBoardSize] = useState<'large' | 'compact'>('large')
+  const [previewPly, setPreviewPly] = useState<number | null>(null)
   const [onboarding, setOnboarding] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fenOpen, setFenOpen] = useState(false)
@@ -87,6 +90,31 @@ export default function ChessApp() {
     observer.observe(container)
     return () => observer.disconnect()
   }, [step])
+
+  // Vorschau (Stellung nach einem Zug der Hauptvariante) zurücksetzen, wenn sich Schritt,
+  // Stellung oder ausgewählter Kandidat ändern.
+  useEffect(() => {
+    setPreviewPly(null)
+  }, [step, board.fen, stockfish.selectedCandidate])
+
+  const preview = useMemo<BoardPreview | null>(() => {
+    if (step !== 'analyze' || previewPly === null) return null
+    const pv = stockfish.candidates[stockfish.selectedCandidate]?.pv ?? []
+    try {
+      const chess = new Chess(board.fen)
+      let last: { from: string; to: string } | null = null
+      let played = 0
+      for (let i = 0; i <= previewPly && i < pv.length; i++) {
+        last = chess.move({ from: pv[i].slice(0, 2), to: pv[i].slice(2, 4), promotion: pv[i][4] })
+        played = i
+      }
+      if (!last) return null
+      const label = principalVariation(board.fen, pv)[played] ?? ''
+      return { fen: chess.fen(), from: last.from, to: last.to, label: `nach ${label}` }
+    } catch {
+      return null
+    }
+  }, [step, previewPly, board.fen, stockfish.candidates, stockfish.selectedCandidate])
 
   useEffect(() => {
     try {
@@ -260,8 +288,8 @@ export default function ChessApp() {
       }
     >
       <div className="zuglotse-app min-h-screen bg-muted/35 text-foreground flex flex-col">
-        <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-xl">
-          <div className="max-w-6xl mx-auto px-4 sm:px-8 h-[76px] flex items-center justify-between gap-3">
+        <header className="md:sticky md:top-0 z-40 bg-background/85 backdrop-blur-xl">
+          <div className="max-w-6xl mx-auto px-4 sm:px-8 h-14 md:h-[76px] flex items-center justify-between gap-3">
             <button
               className="flex items-center gap-2.5 rounded-xl text-left min-h-11"
               aria-label="Zuglotse – Startseite"
@@ -458,7 +486,7 @@ export default function ChessApp() {
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-4 py-6 sm:py-8">
+              <div className="flex items-center justify-between gap-4 py-2 md:py-8">
                 <Button
                   variant="ghost"
                   className="rounded-xl min-h-11 -ml-3"
@@ -481,7 +509,7 @@ export default function ChessApp() {
                 </p>
               </div>
 
-              <div className="mb-7 sm:mb-9">
+              <div className="max-md:sr-only md:mb-9">
                 <p className="zl-eyebrow text-primary mb-2">
                   {step === 'correct' ? 'Du gibst die Richtung vor' : 'Dein Zugkompass'}
                 </p>
@@ -497,104 +525,48 @@ export default function ChessApp() {
                 </p>
               </div>
 
-              <div className="grid lg:grid-cols-[1.12fr_1fr] gap-6 lg:gap-9 items-start">
-                <div className="space-y-4 lg:sticky lg:top-24 min-w-0">
-                  <BoardPanel
-                    step={step}
-                    editFen={board.editFen}
-                    fen={board.fen}
-                    orientation={board.orientation}
-                    boardWidth={boardWidth}
-                    boardContainerRef={boardContainerRef}
-                    turn={board.turn}
-                    editTool={board.editTool}
-                    candidates={stockfish.candidates}
-                    selectedCandidate={stockfish.selectedCandidate}
-                    analysisProgress={stockfish.analysisProgress}
-                    squares={board.squares}
-                    onOrientationToggle={() =>
-                      board.setOrientation((o) => (o === 'white' ? 'black' : 'white'))
-                    }
-                    onPieceDrop={(sourceSquare, targetSquare, piece) => {
-                      board.setSquares((prev) => {
-                        const next = { ...prev, [sourceSquare]: null }
-                        if (targetSquare) next[targetSquare] = piece
-                        return next
-                      })
-                      board.setValidationErrors([])
-                      return true
-                    }}
-                    onSquareClick={(square) => {
-                      board.setSquare(
-                        square,
-                        board.editTool === 'delete' ? null : board.editTool
-                      )
-                    }}
-                  />
-
-                  {step === 'analyze' && (
-                    <div className="zl-panel p-5">
-                      <div
-                        className="flex items-center justify-between gap-3 text-sm mb-3"
-                        role="status"
-                      >
-                        <span className="flex items-center gap-2 font-medium">
-                          {stockfish.analysisProgress < 100 ? (
-                            <Loader2 className="size-4 animate-spin text-primary" />
-                          ) : (
-                            <CheckCircle2 className="size-4 text-primary" />
-                          )}
-                          {stockfish.analysisProgress < 100
-                            ? 'Stockfish analysiert …'
-                            : 'Analyse abgeschlossen'}
-                        </span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {Math.round(stockfish.analysisProgress)} %
-                        </span>
-                      </div>
-                      <div
-                        role="progressbar"
-                        aria-label="Analysefortschritt"
-                        aria-valuenow={Math.round(stockfish.analysisProgress)}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        className="h-1.5 rounded-full bg-muted overflow-hidden"
-                      >
-                        <div
-                          className="bg-primary h-full rounded-full transition-all"
-                          style={{ width: `${stockfish.analysisProgress}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-3">
-                        Stockfish · Suchtiefe {depth} · Berechnung auf deinem Gerät
-                      </p>
-                    </div>
-                  )}
-
-                  {step === 'analyze' && stockfish.analysisProgress >= 100 && (
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="secondary" className="min-h-11 rounded-xl" onClick={exportFen}>
-                        <Download className="size-4 mr-2" />
-                        FEN exportieren
-                      </Button>
-                      <Button variant="secondary" className="min-h-11 rounded-xl" onClick={exportPgn}>
-                        <Download className="size-4 mr-2" />
-                        PGN exportieren
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="min-h-11 rounded-xl"
-                        onClick={() => setStep('correct')}
-                      >
-                        <PenTool className="size-4 mr-2" />
-                        Bearbeiten
-                      </Button>
-                    </div>
-                  )}
-                </div>
+              <div className="md:grid md:grid-cols-[1.12fr_1fr] gap-6 lg:gap-9 md:items-start">
+                <BoardPanel
+                  step={step}
+                  editFen={board.editFen}
+                  fen={board.fen}
+                  orientation={board.orientation}
+                  boardWidth={boardWidth}
+                  boardContainerRef={boardContainerRef}
+                  turn={board.turn}
+                  editTool={board.editTool}
+                  candidates={stockfish.candidates}
+                  selectedCandidate={stockfish.selectedCandidate}
+                  analysisProgress={stockfish.analysisProgress}
+                  squares={board.squares}
+                  boardSize={boardSize}
+                  preview={preview}
+                  onOrientationToggle={() =>
+                    board.setOrientation((o) => (o === 'white' ? 'black' : 'white'))
+                  }
+                  onBoardSizeToggle={() =>
+                    setBoardSize((size) => (size === 'large' ? 'compact' : 'large'))
+                  }
+                  onPreviewClear={() => setPreviewPly(null)}
+                  onPieceDrop={(sourceSquare, targetSquare, piece) => {
+                    board.setSquares((prev) => {
+                      const next = { ...prev, [sourceSquare]: null }
+                      if (targetSquare) next[targetSquare] = piece
+                      return next
+                    })
+                    board.setValidationErrors([])
+                    return true
+                  }}
+                  onSquareClick={(square) => {
+                    board.setSquare(
+                      square,
+                      board.editTool === 'delete' ? null : board.editTool
+                    )
+                  }}
+                />
 
                 {step === 'correct' ? (
-                  <div className="space-y-4 min-w-0">
+                  <div className="space-y-4 min-w-0 max-md:mt-4">
                     {board.photoNotes && (
                       <section
                         className="zl-panel p-5 sm:p-6"
@@ -775,7 +747,46 @@ export default function ChessApp() {
                     </section>
                   </div>
                 ) : (
-                  <div className="space-y-5 min-w-0">
+                  <div className="space-y-5 min-w-0 max-md:mt-4">
+                    {step === 'analyze' && (
+                      <div className="zl-panel p-5">
+                        <div
+                          className="flex items-center justify-between gap-3 text-sm mb-3"
+                          role="status"
+                        >
+                          <span className="flex items-center gap-2 font-medium">
+                            {stockfish.analysisProgress < 100 ? (
+                              <Loader2 className="size-4 animate-spin text-primary" />
+                            ) : (
+                              <CheckCircle2 className="size-4 text-primary" />
+                            )}
+                            {stockfish.analysisProgress < 100
+                              ? 'Stockfish analysiert …'
+                              : 'Analyse abgeschlossen'}
+                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {Math.round(stockfish.analysisProgress)} %
+                          </span>
+                        </div>
+                        <div
+                          role="progressbar"
+                          aria-label="Analysefortschritt"
+                          aria-valuenow={Math.round(stockfish.analysisProgress)}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          className="h-1.5 rounded-full bg-muted overflow-hidden"
+                        >
+                          <div
+                            className="bg-primary h-full rounded-full transition-all"
+                            style={{ width: `${stockfish.analysisProgress}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-3">
+                          Stockfish · Suchtiefe {depth} · Berechnung auf deinem Gerät
+                        </p>
+                      </div>
+                    )}
+
                     <CandidateList
                       fen={board.fen}
                       candidates={stockfish.candidates}
@@ -788,6 +799,8 @@ export default function ChessApp() {
                       fen={board.fen}
                       activeCandidate={stockfish.candidates[stockfish.selectedCandidate]}
                       selectedCandidateIndex={stockfish.selectedCandidate}
+                      previewPly={previewPly}
+                      onPreview={setPreviewPly}
                     />
 
                     <OpeningTutorPanel fen={board.fen} />
@@ -807,6 +820,27 @@ export default function ChessApp() {
                     />
 
                     <CommentaryPanel commentary={stockfish.commentary} />
+
+                    {step === 'analyze' && stockfish.analysisProgress >= 100 && (
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="secondary" className="min-h-11 rounded-xl" onClick={exportFen}>
+                          <Download className="size-4 mr-2" />
+                          FEN exportieren
+                        </Button>
+                        <Button variant="secondary" className="min-h-11 rounded-xl" onClick={exportPgn}>
+                          <Download className="size-4 mr-2" />
+                          PGN exportieren
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="min-h-11 rounded-xl"
+                          onClick={() => setStep('correct')}
+                        >
+                          <PenTool className="size-4 mr-2" />
+                          Bearbeiten
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
