@@ -1,8 +1,15 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { Chess, type Square } from 'chess.js'
-import { squareMapToFen, sanitizeCastling, validateFen } from '@/lib/chess-utils'
+import {
+  squareMapToFen,
+  sanitizeCastling,
+  validateFen,
+  getMoveTargets,
+  applyTapMove,
+  type PromotionPiece,
+} from '@/lib/chess-utils'
 import { toast } from 'sonner'
 
 export type Board = Record<string, string | null>
@@ -32,6 +39,12 @@ export function useChessBoard() {
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
   const [editTool, setEditTool] = useState<string | null>(null)
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
+  const [pendingPromotion, setPendingPromotion] = useState<{
+    from: string
+    to: string
+    color: 'w' | 'b'
+  } | null>(null)
   const [photoNotes, setPhotoNotes] = useState<{
     confidence: string
     corrections: string[]
@@ -50,6 +63,58 @@ export function useChessBoard() {
     },
     [squares, turn, castling, enPassant]
   )
+
+  // Zielfelder der angetippten Figur (Punkte auf dem Brett)
+  const moveTargets = useMemo(
+    () => (selectedSquare && squares[selectedSquare] ? getMoveTargets(editFen, selectedSquare) : []),
+    [selectedSquare, squares, editFen]
+  )
+
+  useEffect(() => {
+    if (selectedSquare && !squares[selectedSquare]) setSelectedSquare(null)
+  }, [squares, selectedSquare])
+
+  useEffect(() => {
+    if (editTool) {
+      setSelectedSquare(null)
+      setPendingPromotion(null)
+    }
+  }, [editTool])
+
+  const playMove = (from: string, to: string, promotion?: PromotionPiece) => {
+    const result = applyTapMove(editFen, squares, castling, from, to, promotion)
+    setSelectedSquare(null)
+    setPendingPromotion(null)
+    if (!result) return
+    setSquares(result.squares)
+    setTurn(result.turn)
+    setCastling(result.castling)
+    setEnPassant(result.enPassant)
+    setValidationErrors([])
+  }
+
+  /** Tipp auf ein Feld ohne Werkzeug: Figur wählen, Zielfeld antippen = Zug ausführen. */
+  const handleSquareTap = (square: string) => {
+    if (pendingPromotion) return
+    const piece = squares[square]
+    const target = selectedSquare ? moveTargets.find((t) => t.square === square) : undefined
+    if (selectedSquare && target) {
+      const mover = squares[selectedSquare]
+      if (target.promotion && mover) {
+        setPendingPromotion({ from: selectedSquare, to: square, color: mover[0] === 'b' ? 'b' : 'w' })
+      } else {
+        playMove(selectedSquare, square)
+      }
+      return
+    }
+    setSelectedSquare(piece && square !== selectedSquare ? square : null)
+  }
+
+  const completePromotion = (promotion: PromotionPiece) => {
+    if (pendingPromotion) playMove(pendingPromotion.from, pendingPromotion.to, promotion)
+  }
+
+  const cancelPromotion = () => setPendingPromotion(null)
 
   const setSquare = (sq: string, piece: string | null) => {
     setSquares(prev => ({ ...prev, [sq]: piece }))
@@ -123,6 +188,12 @@ export function useChessBoard() {
     editTool, setEditTool,
     photoNotes, setPhotoNotes,
     editFen,
+    selectedSquare, setSelectedSquare,
+    moveTargets,
+    pendingPromotion,
+    handleSquareTap,
+    completePromotion,
+    cancelPromotion,
     buildFenFromSquares,
     setSquare,
     resetBoard,
