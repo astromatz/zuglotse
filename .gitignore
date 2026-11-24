@@ -6,7 +6,7 @@
 # testing
 /coverage
 
-# next.js build output (keep docs/ intact as it hosts the static build)
+# next.js build output
 /.next/
 /out/
 
