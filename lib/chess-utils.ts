@@ -100,6 +100,148 @@ export function validateFen(fen: string): { valid: boolean; errors: string[] } {
   return { valid: errors.length === 0, errors }
 }
 
+export interface MoveTarget {
+  square: string
+  capture: boolean
+  promotion: boolean
+}
+
+export type PromotionPiece = 'q' | 'r' | 'b' | 'n'
+
+export interface TapMoveResult {
+  squares: SquareMap
+  turn: 'w' | 'b'
+  castling: { K: boolean; Q: boolean; k: boolean; q: boolean }
+  enPassant: string
+}
+
+function pieceColorAt(placement: string, square: string): 'w' | 'b' | null {
+  const rows = placement.split('/')
+  const row = rows[8 - Number(square[1])] ?? ''
+  const fileIndex = square.charCodeAt(0) - 97
+  let col = 0
+  for (const ch of row) {
+    if (ch >= '1' && ch <= '8') {
+      col += Number(ch)
+      continue
+    }
+    if (col === fileIndex) return ch === ch.toUpperCase() ? 'w' : 'b'
+    col++
+  }
+  return null
+}
+
+/** Lädt die Stellung so, dass die Figur auf `square` am Zug ist (Zugrecht wird bei Bedarf getauscht). */
+function loadForPiece(fen: string, square: string): { chess: Chess; strict: boolean; color: 'w' | 'b' } | null {
+  const parts = fen.trim().split(/\s+/)
+  const color = pieceColorAt(parts[0] ?? '', square)
+  if (!color) return null
+  const adjusted = [...parts]
+  if (adjusted[1] !== color) {
+    adjusted[1] = color
+    adjusted[3] = '-'
+  }
+  const text = adjusted.join(' ')
+  try {
+    return { chess: new Chess(text), strict: true, color }
+  } catch {
+    // Unvollständige Stellung (z. B. fehlender König): Züge ohne Schach-Prüfung berechnen.
+    try {
+      return { chess: new Chess(text, { skipValidation: true }), strict: false, color }
+    } catch {
+      return null
+    }
+  }
+}
+
+/** Zielfelder der Figur auf `square` (regelkonform, bei unvollständiger Stellung ohne Schach-Prüfung). */
+export function getMoveTargets(fen: string, square: string): MoveTarget[] {
+  const loaded = loadForPiece(fen, square)
+  if (!loaded) return []
+  try {
+    const targets = new Map<string, MoveTarget>()
+    for (const move of loaded.chess.moves({ square: square as any, verbose: true })) {
+      const existing = targets.get(move.to)
+      targets.set(move.to, {
+        square: move.to,
+        capture: (existing?.capture ?? false) || move.isCapture() || move.isEnPassant(),
+        promotion: (existing?.promotion ?? false) || !!move.promotion,
+      })
+    }
+    return [...targets.values()]
+  } catch {
+    return []
+  }
+}
+
+function squaresFromPlacement(placement: string): SquareMap {
+  const result: SquareMap = {}
+  const rows = placement.split('/')
+  for (let r = 0; r < 8; r++) {
+    let col = 0
+    for (const ch of rows[r] ?? '') {
+      if (ch >= '1' && ch <= '8') {
+        for (let i = 0; i < Number(ch); i++) result[`${'abcdefgh'[col + i]}${8 - r}`] = null
+        col += Number(ch)
+      } else {
+        result[`${'abcdefgh'[col]}${8 - r}`] = `${ch === ch.toUpperCase() ? 'w' : 'b'}${ch.toUpperCase()}`
+        col++
+      }
+    }
+  }
+  return result
+}
+
+/**
+ * Führt einen Zug der Figur auf `from` nach `to` aus und liefert die neue Stellung.
+ * Zugrecht, Rochaderechte und En-passant-Feld werden dabei automatisch angepasst.
+ */
+export function applyTapMove(
+  fen: string,
+  squares: SquareMap,
+  castling: { K: boolean; Q: boolean; k: boolean; q: boolean },
+  from: string,
+  to: string,
+  promotion?: PromotionPiece
+): TapMoveResult | null {
+  const loaded = loadForPiece(fen, from)
+  if (!loaded) return null
+  const { chess, strict, color } = loaded
+
+  if (strict) {
+    try {
+      chess.move({ from, to, promotion })
+    } catch {
+      return null
+    }
+    const parts = chess.fen().split(' ')
+    const flags = parts[2] ?? '-'
+    return {
+      squares: squaresFromPlacement(parts[0] ?? ''),
+      turn: parts[1] === 'b' ? 'b' : 'w',
+      castling: { K: flags.includes('K'), Q: flags.includes('Q'), k: flags.includes('k'), q: flags.includes('q') },
+      enPassant: parts[3] && parts[3] !== '-' ? parts[3] : '',
+    }
+  }
+
+  // Unvollständige Stellung: Figur einfach versetzen.
+  const piece = squares[from]
+  if (!piece) return null
+  const next: SquareMap = { ...squares, [from]: null }
+  const lastRank = color === 'w' ? '8' : '1'
+  next[to] = piece[1] === 'P' && to[1] === lastRank ? `${color}${(promotion ?? 'q').toUpperCase()}` : piece
+  const flags = { ...castling }
+  const touched = [from, to]
+  if (piece[1] === 'K') {
+    if (color === 'w') { flags.K = false; flags.Q = false } else { flags.k = false; flags.q = false }
+  }
+  if (touched.includes('a1')) flags.Q = false
+  if (touched.includes('h1')) flags.K = false
+  if (touched.includes('a8')) flags.q = false
+  if (touched.includes('h8')) flags.k = false
+  return { squares: next, turn: color === 'w' ? 'b' : 'w', castling: flags, enPassant: '' }
+}
+
 export function getMaterialBalance(fen: string): { white: Record<string,number>; black: Record<string,number>; balance: number } {
   const board = fen?.split(' ')?.[0] ?? ''
   const values: Record<string, number> = { P:1, N:3, B:3, R:5, Q:9, K:0 }

@@ -97,6 +97,11 @@ export default function ChessApp() {
     setPreviewPly(null)
   }, [step, board.fen, stockfish.selectedCandidate])
 
+  useEffect(() => {
+    board.setSelectedSquare(null)
+    board.cancelPromotion()
+  }, [step])
+
   const preview = useMemo<BoardPreview | null>(() => {
     if (step !== 'analyze' || previewPly === null) return null
     const pv = stockfish.candidates[stockfish.selectedCandidate]?.pv ?? []
@@ -219,6 +224,7 @@ export default function ChessApp() {
     board.setValidationErrors([])
     setStep('analyze')
     ai.reset()
+    window.scrollTo({ top: 0 })
 
     stockfish.startAnalysis(currentFen, (finalFen, finalCandidates, bestMove) => {
       hist.saveHistory(finalFen, { candidates: finalCandidates, fen: finalFen, bestMove })
@@ -541,6 +547,17 @@ export default function ChessApp() {
                   squares={board.squares}
                   boardSize={boardSize}
                   preview={preview}
+                  selectedSquare={board.selectedSquare}
+                  moveTargets={board.moveTargets}
+                  promotion={
+                    board.pendingPromotion
+                      ? {
+                          color: board.pendingPromotion.color,
+                          onPick: board.completePromotion,
+                          onCancel: board.cancelPromotion,
+                        }
+                      : null
+                  }
                   onOrientationToggle={() =>
                     board.setOrientation((o) => (o === 'white' ? 'black' : 'white'))
                   }
@@ -548,7 +565,9 @@ export default function ChessApp() {
                     setBoardSize((size) => (size === 'large' ? 'compact' : 'large'))
                   }
                   onPreviewClear={() => setPreviewPly(null)}
+                  onAnalyze={startAnalysis}
                   onPieceDrop={(sourceSquare, targetSquare, piece) => {
+                    board.setSelectedSquare(null)
                     board.setSquares((prev) => {
                       const next = { ...prev, [sourceSquare]: null }
                       if (targetSquare) next[targetSquare] = piece
@@ -558,10 +577,11 @@ export default function ChessApp() {
                     return true
                   }}
                   onSquareClick={(square) => {
-                    board.setSquare(
-                      square,
-                      board.editTool === 'delete' ? null : board.editTool
-                    )
+                    if (board.editTool) {
+                      board.setSquare(square, board.editTool === 'delete' ? null : board.editTool)
+                    } else {
+                      board.handleSquareTap(square)
+                    }
                   }}
                 />
 

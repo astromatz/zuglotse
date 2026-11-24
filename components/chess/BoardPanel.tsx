@@ -1,10 +1,11 @@
 import dynamic from 'next/dynamic'
-import { Maximize2, Minimize2, RotateCcw, Undo2 } from 'lucide-react'
+import { BarChart3, Maximize2, Minimize2, RotateCcw, Undo2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EvalBar } from './EvalBar'
 import { evaluationPercent } from '@/lib/local-commentary'
 import type { StockfishCandidate } from '@/lib/stockfish-worker'
 import type { Board } from '@/hooks/useChessBoard'
+import type { MoveTarget, PromotionPiece } from '@/lib/chess-utils'
 
 const Chessboard = dynamic(() => import('react-chessboard').then(m => m.Chessboard), {
   ssr: false,
@@ -23,6 +24,27 @@ const arrowColor = (index: number, active: boolean) =>
 // Feldmarkierung (gelber Innenrahmen, damit das Schachbrettmuster sichtbar bleibt)
 const FROM_STYLE = { boxShadow: 'inset 0 0 0 3px rgba(250, 204, 21, 0.55)' }
 const TO_STYLE = { boxShadow: 'inset 0 0 0 3px rgba(250, 204, 21, 0.95)' }
+
+// Zielfelder der angetippten Figur: hellgrauer Punkt, bei Schlagfeldern ein Ring
+const TARGET_DOT_STYLE = {
+  backgroundImage:
+    'radial-gradient(circle closest-side, rgba(150, 150, 150, 0.75) 0, rgba(150, 150, 150, 0.75) 28%, transparent 30%)',
+}
+const TARGET_CAPTURE_STYLE = {
+  backgroundImage:
+    'radial-gradient(circle closest-side, transparent 0, transparent 70%, rgba(150, 150, 150, 0.75) 72%, rgba(150, 150, 150, 0.75) 90%, transparent 92%)',
+}
+
+const PROMOTION_GLYPHS: Record<'w' | 'b', Record<PromotionPiece, string>> = {
+  w: { q: '♕', r: '♖', b: '♗', n: '♘' },
+  b: { q: '♛', r: '♜', b: '♝', n: '♞' },
+}
+const PROMOTION_NAMES: Record<PromotionPiece, string> = {
+  q: 'Dame',
+  r: 'Turm',
+  b: 'Läufer',
+  n: 'Springer',
+}
 
 /** Vorschau: Stellung nach einem Zug der Hauptvariante. */
 export interface BoardPreview {
@@ -47,9 +69,13 @@ interface BoardPanelProps {
   squares: Board
   boardSize: 'large' | 'compact'
   preview: BoardPreview | null
+  selectedSquare: string | null
+  moveTargets: MoveTarget[]
+  promotion: { color: 'w' | 'b'; onPick: (piece: PromotionPiece) => void; onCancel: () => void } | null
   onOrientationToggle: () => void
   onBoardSizeToggle: () => void
   onPreviewClear: () => void
+  onAnalyze: () => void
   onPieceDrop: (source: string, target: string, piece: string | null) => boolean
   onSquareClick: (square: string) => void
 }
@@ -69,9 +95,13 @@ export function BoardPanel({
   squares,
   boardSize,
   preview,
+  selectedSquare,
+  moveTargets,
+  promotion,
   onOrientationToggle,
   onBoardSizeToggle,
   onPreviewClear,
+  onAnalyze,
   onPieceDrop,
   onSquareClick,
 }: BoardPanelProps) {
@@ -113,10 +143,47 @@ export function BoardPanel({
     }
   }
 
+  if (step === 'correct' && !editTool && selectedSquare) {
+    squareStyles[selectedSquare] = TO_STYLE
+    for (const target of moveTargets) {
+      squareStyles[target.square] = target.capture ? TARGET_CAPTURE_STYLE : TARGET_DOT_STYLE
+    }
+  }
+
   const position = step === 'correct' ? editFen : preview ? preview.fen : fen
 
   return (
     <div className="zl-panel zl-board-dock p-3 sm:p-5">
+      {promotion ? (
+        <div className="zl-board-strip flex items-center justify-between gap-2 mb-2 md:mb-4 px-1">
+          <span className="text-sm font-semibold truncate">Umwandeln in</span>
+          <div className="flex items-center gap-1 shrink-0">
+            {(['q', 'r', 'b', 'n'] as const).map((piece) => (
+              <Button
+                key={piece}
+                variant="secondary"
+                className="size-11 rounded-xl p-0"
+                aria-label={PROMOTION_NAMES[piece]}
+                title={PROMOTION_NAMES[piece]}
+                onClick={() => promotion.onPick(piece)}
+              >
+                <span className="chess-glyph" aria-hidden="true">
+                  {PROMOTION_GLYPHS[promotion.color][piece]}
+                </span>
+              </Button>
+            ))}
+            <Button
+              variant="ghost"
+              className="size-11 rounded-xl p-0"
+              aria-label="Umwandlung abbrechen"
+              title="Abbrechen"
+              onClick={promotion.onCancel}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : (
       <div className="zl-board-strip flex items-center justify-between gap-2 mb-2 md:mb-4 px-1">
         <span className="text-sm font-semibold flex items-center gap-2 min-w-0">
           {preview ? (
@@ -159,6 +226,12 @@ export function BoardPanel({
               )}
             </Button>
           )}
+          {step === 'correct' && (
+            <Button className="h-11 rounded-xl px-4" onClick={onAnalyze}>
+              <BarChart3 className="size-4" />
+              Analysieren
+            </Button>
+          )}
           <Button
             variant="ghost"
             className="size-11 rounded-xl p-0"
@@ -170,6 +243,7 @@ export function BoardPanel({
           </Button>
         </div>
       </div>
+      )}
 
       {/* Board + EvalBar row */}
       <div className="flex items-stretch justify-center gap-2">
@@ -201,7 +275,7 @@ export function BoardPanel({
                   return onPieceDrop(sourceSquare, targetSquare, piece)
                 },
                 onSquareClick: ({ square }) => {
-                  if (step === 'correct' && editTool) onSquareClick(square)
+                  if (step === 'correct') onSquareClick(square)
                 },
                 arrows,
                 squareStyles,
@@ -213,7 +287,7 @@ export function BoardPanel({
 
       <p className="text-xs text-muted-foreground text-center mt-4 max-md:hidden">
         {step === 'correct'
-          ? 'Deine Änderungen werden sofort in die FEN übernommen.'
+          ? 'Figur antippen zeigt ihre Züge, Zielfeld antippen führt den Zug aus. Ziehen setzt Figuren frei um.'
           : 'Tippe auf einen Kandidaten oder einen Zug der Hauptvariante, um ihn auf dem Brett zu sehen.'}
       </p>
     </div>

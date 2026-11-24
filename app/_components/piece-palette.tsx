@@ -38,6 +38,6 @@ export function PiecePalette({ tool, onTool, onClear, onStart }: {
       <Button variant="secondary" className="min-h-12 rounded-xl gap-2 px-2 max-[360px]:flex-col max-[360px]:py-3" onClick={onClear}><Trash2 className="size-4 shrink-0" /> Feld leeren</Button>
       <Button variant="secondary" className="min-h-12 rounded-xl gap-2 px-2 max-[360px]:flex-col max-[360px]:py-3" onClick={onStart}><Grid2X2 className="size-4 shrink-0" /> Startaufstellung</Button>
     </div>
-    <p className="text-xs text-muted-foreground leading-relaxed mt-4" aria-live="polite">{tool === 'delete' ? 'Tippe auf eine Figur, um sie zu entfernen.' : tool ? 'Tippe auf das gewünschte Zielfeld. Erneutes Antippen der Figur beendet das Werkzeug.' : 'Ziehe Figuren auf andere Felder. Vom Brett ziehen entfernt eine Figur.'}</p>
+    <p className="text-xs text-muted-foreground leading-relaxed mt-4" aria-live="polite">{tool === 'delete' ? 'Tippe auf eine Figur, um sie zu entfernen.' : tool ? 'Tippe auf das gewünschte Zielfeld. Erneutes Antippen der Figur beendet das Werkzeug.' : 'Tippe eine Figur an, um ihre Züge zu sehen, und dann ein Zielfeld, um zu ziehen. Mit dem Finger ziehen setzt Figuren frei um; vom Brett ziehen entfernt sie.'}</p>
   </section>
 }
