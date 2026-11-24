@@ -19,6 +19,7 @@ import {
   History,
   Loader2,
   PenTool,
+  RefreshCw,
   Settings2,
   ShieldCheck,
   AlertTriangle,
@@ -27,7 +28,7 @@ import {
 import { Chess } from 'chess.js'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { validateFen } from '@/lib/chess-utils'
+import { validateFen, type PromotionPiece } from '@/lib/chess-utils'
 import { principalVariation } from '@/lib/local-commentary'
 import { AI_KEY_STORAGE, PROVIDER_LABEL, imageToDataUrl, recognizeBoard, type AiSettings } from '@/lib/ai-providers'
 import { repairPosition, rowsToSquares } from '@/lib/position-repair'
@@ -40,7 +41,7 @@ import { useStockfish } from '@/hooks/useStockfish'
 import { useAiExplanation } from '@/hooks/useAiExplanation'
 import { useHistory, type HistoryItem } from '@/hooks/useHistory'
 
-import { BoardPanel, type BoardPreview } from '@/components/chess/BoardPanel'
+import { BoardPanel, type AnalyzeState, type BoardPreview } from '@/components/chess/BoardPanel'
 import { CandidateList } from '@/components/chess/CandidateList'
 import { VariationPanel } from '@/components/chess/VariationPanel'
 import { OpeningTutorPanel } from '@/components/chess/OpeningTutorPanel'
@@ -50,10 +51,14 @@ import { FenDialog } from '@/components/chess/FenDialog'
 import { HistoryDialog } from '@/components/chess/HistoryDialog'
 
 const PREFERENCES_KEY = 'zuglotse_preferences_v1'
-type Step = 'start' | 'correct' | 'analyze'
+type Step = 'start' | 'work'
+type Panel = 'build' | 'analysis'
 
 export default function ChessApp() {
   const [step, setStep] = useState<Step>('start')
+  const [panel, setPanel] = useState<Panel>('build')
+  // Stellung (FEN), für die zuletzt eine Analyse gestartet wurde. Weicht das Brett davon ab, ist die Analyse veraltet.
+  const [analysisFen, setAnalysisFen] = useState<string | null>(null)
   const [depth, setDepth] = useState(18)
   const [boardWidth, setBoardWidth] = useState(350)
   const [boardSize, setBoardSize] = useState<'large' | 'compact'>('large')
@@ -81,6 +86,26 @@ export default function ChessApp() {
 
   const aiActive = aiSettings.mode === 'key' && aiSettings.apiKey.trim().length > 0
 
+  // Die Analyse gilt nur, solange das Brett genau die analysierte Stellung zeigt.
+  const fresh = analysisFen !== null && analysisFen === board.editFen
+  const analyzeState: AnalyzeState =
+    analysisFen === null
+      ? 'idle'
+      : !fresh
+      ? 'stale'
+      : stockfish.analysisProgress < 100
+      ? 'running'
+      : 'done'
+
+  // Wird die Stellung verändert, während Stockfish noch rechnet, wird die laufende Analyse abgebrochen.
+  useEffect(() => {
+    if (analysisFen !== null && analysisFen !== board.editFen && stockfish.analysisProgress < 100) {
+      stockfish.terminate()
+      stockfish.reset()
+      setAnalysisFen(null)
+    }
+  }, [board.editFen, analysisFen])
+
   useEffect(() => {
     const container = boardContainerRef.current
     if (!container) return
@@ -95,7 +120,7 @@ export default function ChessApp() {
   // Stellung oder ausgewählter Kandidat ändern.
   useEffect(() => {
     setPreviewPly(null)
-  }, [step, board.fen, stockfish.selectedCandidate])
+  }, [step, fresh, board.fen, stockfish.selectedCandidate])
 
   useEffect(() => {
     board.setSelectedSquare(null)
@@ -103,7 +128,7 @@ export default function ChessApp() {
   }, [step])
 
   const preview = useMemo<BoardPreview | null>(() => {
-    if (step !== 'analyze' || previewPly === null) return null
+    if (!fresh || previewPly === null) return null
     const pv = stockfish.candidates[stockfish.selectedCandidate]?.pv ?? []
     try {
       const chess = new Chess(board.fen)
@@ -119,7 +144,7 @@ export default function ChessApp() {
     } catch {
       return null
     }
-  }, [step, previewPly, board.fen, stockfish.candidates, stockfish.selectedCandidate])
+  }, [fresh, previewPly, board.fen, stockfish.candidates, stockfish.selectedCandidate])
 
   useEffect(() => {
     try {
@@ -172,6 +197,23 @@ export default function ChessApp() {
     if (next.mode === 'key') toast.success(`KI aktiv: ${PROVIDER_LABEL[next.provider]}`)
   }
 
+  /** Öffnet den Arbeitsbildschirm mit frischem Stand (keine alte Analyse). */
+  const openWorkspace = () => {
+    stockfish.terminate()
+    stockfish.reset()
+    ai.reset()
+    setAnalysisFen(null)
+    setPanel('build')
+    setStep('work')
+  }
+
+  const goToStart = () => {
+    stockfish.terminate()
+    stockfish.reset()
+    setAnalysisFen(null)
+    setStep('start')
+  }
+
   const handlePhoto = async (file: File | undefined) => {
     if (!file) return
     if (!aiActive) {
@@ -201,7 +243,8 @@ export default function ChessApp() {
         corrections: repaired.corrections,
         issues: repaired.remainingIssues,
       })
-      setStep('correct')
+      board.clearHistory()
+      openWorkspace()
       toast.success('Stellung erkannt – bitte kurz prüfen')
     } catch (error) {
       console.error('Foto-Erkennung fehlgeschlagen:', error)
@@ -218,11 +261,14 @@ export default function ChessApp() {
     const val = validateFen(currentFen)
     if (!val.valid) {
       board.setValidationErrors(val.errors)
+      setPanel('build')
       toast.error(val.errors?.[0] ?? 'Ungültige Stellung')
       return
     }
     board.setValidationErrors([])
-    setStep('analyze')
+    stockfish.terminate()
+    setAnalysisFen(currentFen)
+    setPanel('analysis')
     ai.reset()
     window.scrollTo({ top: 0 })
 
@@ -230,6 +276,14 @@ export default function ChessApp() {
       hist.saveHistory(finalFen, { candidates: finalCandidates, fen: finalFen, bestMove })
       ai.requestAiExplanation(aiSettings, finalFen, finalCandidates)
     })
+  }
+
+  /** Spielt den Zug eines Kandidaten auf dem Brett; die Analyse gilt danach als veraltet. */
+  const playCandidate = (index: number) => {
+    const move = stockfish.candidates[index]?.move ?? ''
+    if (move.length < 4) return
+    const promotion = move.length > 4 ? (move[4] as PromotionPiece) : undefined
+    board.playMove(move.slice(0, 2), move.slice(2, 4), promotion)
   }
 
   const downloadText = (content: string, name: string) => {
@@ -244,7 +298,7 @@ export default function ChessApp() {
   }
 
   const exportFen = () => {
-    downloadText(step === 'correct' ? board.editFen : board.fen, 'stellung.fen')
+    downloadText(board.editFen, 'stellung.fen')
     toast.success('FEN exportiert')
   }
 
@@ -267,7 +321,7 @@ export default function ChessApp() {
     stockfish.terminate()
     board.setFenInput(item.fen)
     if (board.handleFenImport(item.fen)) {
-      setStep('correct')
+      openWorkspace()
     }
     setShowHistory(false)
   }
@@ -279,6 +333,40 @@ export default function ChessApp() {
           <AlertTriangle className="size-4 text-destructive mt-0.5 shrink-0" />
           {error}
         </p>
+      ))}
+    </div>
+  )
+
+  const panelTabs = (
+    <div
+      role="tablist"
+      aria-label="Bereich"
+      className="flex bg-muted p-1 rounded-xl"
+    >
+      {(
+        [
+          ['build', 'Aufbau'],
+          ['analysis', 'Analyse'],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          role="tab"
+          aria-selected={panel === key}
+          className={`flex-1 min-h-11 rounded-lg text-sm font-medium transition-shadow flex items-center justify-center gap-2 ${
+            panel === key ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'
+          }`}
+          onClick={() => setPanel(key)}
+        >
+          {label}
+          {key === 'analysis' && analyzeState === 'stale' && (
+            <span
+              className="size-2 rounded-full bg-amber-500"
+              role="img"
+              aria-label="Analyse veraltet"
+            />
+          )}
+        </button>
       ))}
     </div>
   )
@@ -299,10 +387,7 @@ export default function ChessApp() {
             <button
               className="flex items-center gap-2.5 rounded-xl text-left min-h-11"
               aria-label="Zuglotse – Startseite"
-              onClick={() => {
-                stockfish.terminate()
-                setStep('start')
-              }}
+              onClick={goToStart}
             >
               <span className="size-10 flex items-center justify-center rounded-[14px] bg-primary text-primary-foreground shadow-sm">
                 <Compass className="size-6" />
@@ -388,7 +473,7 @@ export default function ChessApp() {
                     size="lg"
                     onClick={() => {
                       board.handleManualSetup(false)
-                      setStep('correct')
+                      openWorkspace()
                     }}
                   >
                     <PenTool className="size-4 mr-2" />
@@ -400,7 +485,7 @@ export default function ChessApp() {
                     className="w-full rounded-xl min-h-11 mt-2 text-primary"
                     onClick={() => {
                       board.handleManualSetup(true)
-                      setStep('correct')
+                      openWorkspace()
                     }}
                   >
                     Mit Startaufstellung beginnen
@@ -493,47 +578,31 @@ export default function ChessApp() {
           ) : (
             <>
               <div className="flex items-center justify-between gap-4 py-2 md:py-8">
-                <Button
-                  variant="ghost"
-                  className="rounded-xl min-h-11 -ml-3"
-                  onClick={() => {
-                    stockfish.terminate()
-                    setStep(step === 'analyze' ? 'correct' : 'start')
-                  }}
-                >
+                <Button variant="ghost" className="rounded-xl min-h-11 -ml-3" onClick={goToStart}>
                   <ArrowLeft className="size-4 mr-2" />
-                  {step === 'analyze' ? 'Zum Brett' : 'Zurück'}
+                  Zurück
                 </Button>
-                <p className="text-xs text-muted-foreground">
-                  <span className={step === 'correct' ? 'text-primary font-semibold' : ''}>
-                    01 Stellung
-                  </span>
-                  <span className="mx-2 sm:mx-4">/</span>
-                  <span className={step === 'analyze' ? 'text-primary font-semibold' : ''}>
-                    02 Analyse
-                  </span>
-                </p>
+                <p className="text-xs text-muted-foreground">Arbeitsbrett</p>
               </div>
 
               <div className="max-md:sr-only md:mb-9">
-                <p className="zl-eyebrow text-primary mb-2">
-                  {step === 'correct' ? 'Du gibst die Richtung vor' : 'Dein Zugkompass'}
-                </p>
+                <p className="zl-eyebrow text-primary mb-2">Dein Arbeitsbrett</p>
                 <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
-                  {step === 'correct'
-                    ? 'Bring deine Stellung aufs Brett.'
-                    : 'Die besten Wege nach vorn.'}
+                  Aufbauen, analysieren, weiterspielen.
                 </h1>
                 <p className="text-muted-foreground text-sm mt-3">
-                  {step === 'correct'
-                    ? 'Setze die Figuren, wähle das Zugrecht und starte die Analyse.'
-                    : 'Drei Kandidaten. Klare Bewertungen. Nachvollziehbare Varianten.'}
+                  Verändere die Stellung jederzeit – die Analyse gilt immer für das, was du auf dem
+                  Brett siehst.
                 </p>
               </div>
 
               <div className="md:grid md:grid-cols-[1.12fr_1fr] gap-6 lg:gap-9 md:items-start">
                 <BoardPanel
-                  step={step}
+                  analysisActive={fresh}
+                  analyzeState={analyzeState}
+                  canUndo={board.canUndo}
+                  showSizeToggle={fresh}
+                  onUndo={board.undo}
                   editFen={board.editFen}
                   fen={board.fen}
                   orientation={board.orientation}
@@ -568,6 +637,7 @@ export default function ChessApp() {
                   onAnalyze={startAnalysis}
                   onPieceDrop={(sourceSquare, targetSquare, piece) => {
                     board.setSelectedSquare(null)
+                    board.pushHistory()
                     board.setSquares((prev) => {
                       const next = { ...prev, [sourceSquare]: null }
                       if (targetSquare) next[targetSquare] = piece
@@ -585,8 +655,10 @@ export default function ChessApp() {
                   }}
                 />
 
-                {step === 'correct' ? (
-                  <div className="space-y-4 min-w-0 max-md:mt-4">
+                <div className="space-y-4 min-w-0 max-md:mt-4">
+                {panelTabs}
+                {panel === 'build' ? (
+                  <div className="space-y-4 min-w-0">
                     {board.photoNotes && (
                       <section
                         className="zl-panel p-5 sm:p-6"
@@ -754,9 +826,20 @@ export default function ChessApp() {
 
                       {errors}
 
-                      <Button className="zl-primary w-full" size="lg" onClick={startAnalysis}>
+                      <Button
+                        className="zl-primary w-full"
+                        size="lg"
+                        disabled={analyzeState === 'running'}
+                        onClick={startAnalysis}
+                      >
                         <BarChart3 className="size-5 mr-2" />
-                        Stellung analysieren
+                        {analyzeState === 'stale'
+                          ? 'Neu analysieren'
+                          : analyzeState === 'done'
+                          ? 'Erneut analysieren'
+                          : analyzeState === 'running'
+                          ? 'Analyse läuft …'
+                          : 'Stellung analysieren'}
                         <ArrowRight className="size-4 ml-auto" />
                       </Button>
                       <p className="text-xs text-muted-foreground text-center">
@@ -766,9 +849,35 @@ export default function ChessApp() {
                       </p>
                     </section>
                   </div>
+                ) : analysisFen === null ? (
+                  <div className="zl-panel p-6 space-y-4">
+                    <h2 className="font-display text-xl font-bold tracking-tight">Noch keine Analyse</h2>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Baue oder verändere die Stellung auf dem Brett und lass Stockfish die besten
+                      Züge suchen.
+                    </p>
+                    <Button className="zl-primary w-full" size="lg" onClick={startAnalysis}>
+                      <BarChart3 className="size-5 mr-2" />
+                      Stellung analysieren
+                    </Button>
+                  </div>
+                ) : !fresh ? (
+                  <div className="zl-panel p-6 space-y-4" role="status">
+                    <h2 className="font-display text-xl font-bold tracking-tight">
+                      Die Stellung hat sich geändert
+                    </h2>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Die bisherige Analyse passt nicht mehr zum Brett und ist ausgeblendet. Mit
+                      „Zurücknehmen“ kommst du zur analysierten Stellung zurück.
+                    </p>
+                    <Button className="zl-primary w-full" size="lg" onClick={startAnalysis}>
+                      <RefreshCw className="size-5 mr-2" />
+                      Neu analysieren
+                    </Button>
+                  </div>
                 ) : (
-                  <div className="space-y-5 min-w-0 max-md:mt-4">
-                    {step === 'analyze' && (
+                  <div className="space-y-5 min-w-0">
+                    {(
                       <div className="zl-panel p-5">
                         <div
                           className="flex items-center justify-between gap-3 text-sm mb-3"
@@ -813,6 +922,7 @@ export default function ChessApp() {
                       selectedCandidate={stockfish.selectedCandidate}
                       analysisProgress={stockfish.analysisProgress}
                       onSelect={(i) => stockfish.setSelectedCandidate(i)}
+                      onPlay={playCandidate}
                     />
 
                     <VariationPanel
@@ -841,7 +951,7 @@ export default function ChessApp() {
 
                     <CommentaryPanel commentary={stockfish.commentary} />
 
-                    {step === 'analyze' && stockfish.analysisProgress >= 100 && (
+                    {stockfish.analysisProgress >= 100 && (
                       <div className="flex flex-wrap gap-2">
                         <Button variant="secondary" className="min-h-11 rounded-xl" onClick={exportFen}>
                           <Download className="size-4 mr-2" />
@@ -851,18 +961,11 @@ export default function ChessApp() {
                           <Download className="size-4 mr-2" />
                           PGN exportieren
                         </Button>
-                        <Button
-                          variant="ghost"
-                          className="min-h-11 rounded-xl"
-                          onClick={() => setStep('correct')}
-                        >
-                          <PenTool className="size-4 mr-2" />
-                          Bearbeiten
-                        </Button>
                       </div>
                     )}
                   </div>
                 )}
+                </div>
               </div>
             </>
           )}
@@ -903,7 +1006,7 @@ export default function ChessApp() {
           onSubmit={() => {
             if (board.handleFenImport()) {
               setFenOpen(false)
-              setStep('correct')
+              openWorkspace()
             }
           }}
         />

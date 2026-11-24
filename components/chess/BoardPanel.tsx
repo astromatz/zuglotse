@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic'
-import { BarChart3, Maximize2, Minimize2, RotateCcw, Undo2, X } from 'lucide-react'
+import { BarChart3, Loader2, Maximize2, Minimize2, RefreshCw, RotateCcw, Undo2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EvalBar } from './EvalBar'
 import { evaluationPercent } from '@/lib/local-commentary'
@@ -54,8 +54,15 @@ export interface BoardPreview {
   label: string
 }
 
+/** idle: noch nie analysiert · stale: Stellung seit der Analyse verändert · running/done: Analyse der aktuellen Stellung */
+export type AnalyzeState = 'idle' | 'stale' | 'running' | 'done'
+
 interface BoardPanelProps {
-  step: 'correct' | 'analyze'
+  /** Analyse gehört zur Stellung auf dem Brett: Pfeile, Bewertung und Kandidaten gelten. */
+  analysisActive: boolean
+  analyzeState: AnalyzeState
+  canUndo: boolean
+  showSizeToggle: boolean
   editFen: string
   fen: string
   orientation: 'white' | 'black'
@@ -76,12 +83,16 @@ interface BoardPanelProps {
   onBoardSizeToggle: () => void
   onPreviewClear: () => void
   onAnalyze: () => void
+  onUndo: () => void
   onPieceDrop: (source: string, target: string, piece: string | null) => boolean
   onSquareClick: (square: string) => void
 }
 
 export function BoardPanel({
-  step,
+  analysisActive,
+  analyzeState,
+  canUndo,
+  showSizeToggle,
   editFen,
   fen,
   orientation,
@@ -102,19 +113,20 @@ export function BoardPanel({
   onBoardSizeToggle,
   onPreviewClear,
   onAnalyze,
+  onUndo,
   onPieceDrop,
   onSquareClick,
 }: BoardPanelProps) {
+  // Bearbeiten ist immer möglich – nur nicht, solange eine Vorschau-Variante gezeigt wird.
+  const editable = !preview
   const bestCandidate = candidates[0]
-  const evalPercent = bestCandidate
-    ? evaluationPercent(fen, bestCandidate)
-    : 50
+  const evalPercent = analysisActive && bestCandidate ? evaluationPercent(fen, bestCandidate) : 50
 
   // Pfeile und Feldmarkierungen: Vorschau-Zug oder alle Kandidaten (ausgewählter kräftig, oben)
   const arrows: { startSquare: string; endSquare: string; color: string }[] = []
   const squareStyles: Record<string, React.CSSProperties> = {}
 
-  if (step === 'analyze') {
+  if (analysisActive) {
     if (preview) {
       arrows.push({ startSquare: preview.from, endSquare: preview.to, color: arrowColor(0, true) })
       squareStyles[preview.from] = FROM_STYLE
@@ -143,14 +155,14 @@ export function BoardPanel({
     }
   }
 
-  if (step === 'correct' && !editTool && selectedSquare) {
+  if (editable && !editTool && selectedSquare) {
     squareStyles[selectedSquare] = TO_STYLE
     for (const target of moveTargets) {
       squareStyles[target.square] = target.capture ? TARGET_CAPTURE_STYLE : TARGET_DOT_STYLE
     }
   }
 
-  const position = step === 'correct' ? editFen : preview ? preview.fen : fen
+  const position = preview ? preview.fen : editFen
 
   return (
     <div className="zl-panel zl-board-dock p-3 sm:p-5">
@@ -195,7 +207,10 @@ export function BoardPanel({
                   turn === 'w' ? 'bg-white' : 'bg-gray-900'
                 }`}
               />
-              <span className="truncate">{turn === 'w' ? 'Weiß' : 'Schwarz'} am Zug</span>
+              <span className="truncate">
+                {turn === 'w' ? 'Weiß' : 'Schwarz'}
+                <span className="max-[400px]:hidden"> am Zug</span>
+              </span>
             </>
           )}
         </span>
@@ -211,7 +226,7 @@ export function BoardPanel({
               Zurück
             </Button>
           )}
-          {step === 'analyze' && (
+          {showSizeToggle && (
             <Button
               variant="ghost"
               className="size-11 rounded-xl p-0 md:hidden"
@@ -226,10 +241,32 @@ export function BoardPanel({
               )}
             </Button>
           )}
-          {step === 'correct' && (
-            <Button className="h-11 rounded-xl px-4" onClick={onAnalyze}>
-              <BarChart3 className="size-4" />
-              Analysieren
+          {!preview && (
+            <Button
+              variant="ghost"
+              className="size-11 rounded-xl p-0"
+              aria-label="Letzte Änderung zurücknehmen"
+              title="Zurücknehmen"
+              disabled={!canUndo}
+              onClick={onUndo}
+            >
+              <Undo2 className="size-4" />
+            </Button>
+          )}
+          {!preview && analyzeState !== 'done' && (
+            <Button
+              className="h-11 rounded-xl px-4"
+              disabled={analyzeState === 'running'}
+              onClick={onAnalyze}
+            >
+              {analyzeState === 'running' ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : analyzeState === 'stale' ? (
+                <RefreshCw className="size-4" />
+              ) : (
+                <BarChart3 className="size-4" />
+              )}
+              {analyzeState === 'running' ? 'Läuft …' : 'Analysieren'}
             </Button>
           )}
           <Button
@@ -247,14 +284,12 @@ export function BoardPanel({
 
       {/* Board + EvalBar row */}
       <div className="flex items-stretch justify-center gap-2">
-        {/* Eval bar only in analyze step */}
-        {step === 'analyze' && (
-          <EvalBar percent={evalPercent} isAnalyzing={analysisProgress < 100} />
-        )}
+        {/* Bewertungsbalken ist immer da (neutral ohne gültige Analyse), damit das Brett nicht springt */}
+        <EvalBar percent={evalPercent} isAnalyzing={!analysisActive || analysisProgress < 100} />
 
         <div
           ref={boardContainerRef}
-          data-size={step === 'analyze' ? boardSize : 'large'}
+          data-size={showSizeToggle ? boardSize : 'large'}
           className="zl-board-wrap flex-1 flex justify-center min-w-0"
         >
           <div
@@ -265,17 +300,17 @@ export function BoardPanel({
               options={{
                 position,
                 boardOrientation: orientation,
-                allowDragging: step === 'correct',
+                allowDragging: editable,
                 darkSquareStyle: { backgroundColor: '#5D8A66' },
                 lightSquareStyle: { backgroundColor: '#EEEED2' },
                 boardStyle: { width: boardWidth, maxWidth: '100%' },
                 onPieceDrop: ({ sourceSquare, targetSquare }) => {
-                  if (step !== 'correct' || !targetSquare || targetSquare === sourceSquare) return false
+                  if (!editable || !targetSquare || targetSquare === sourceSquare) return false
                   const piece = squares[sourceSquare] ?? null
                   return onPieceDrop(sourceSquare, targetSquare, piece)
                 },
                 onSquareClick: ({ square }) => {
-                  if (step === 'correct') onSquareClick(square)
+                  if (editable) onSquareClick(square)
                 },
                 arrows,
                 squareStyles,
@@ -286,9 +321,9 @@ export function BoardPanel({
       </div>
 
       <p className="text-xs text-muted-foreground text-center mt-4 max-md:hidden">
-        {step === 'correct'
-          ? 'Figur antippen zeigt ihre Züge, Zielfeld antippen führt den Zug aus. Ziehen setzt Figuren frei um.'
-          : 'Tippe auf einen Kandidaten oder einen Zug der Hauptvariante, um ihn auf dem Brett zu sehen.'}
+        {analysisActive
+          ? 'Tippe auf einen Kandidaten oder einen Zug der Hauptvariante, um ihn zu sehen – oder zieh selbst weiter.'
+          : 'Figur antippen zeigt ihre Züge, Zielfeld antippen führt den Zug aus. Ziehen setzt Figuren frei um.'}
       </p>
     </div>
   )

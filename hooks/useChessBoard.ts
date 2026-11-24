@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Chess, type Square } from 'chess.js'
 import {
   squareMapToFen,
@@ -29,6 +29,16 @@ export function squaresFromFen(value: string): Board {
   return result
 }
 
+/** Stand der Stellung für „Zurück“ (ohne Auswahl- und Werkzeugzustand). */
+interface PositionSnapshot {
+  squares: Board
+  turn: 'w' | 'b'
+  castling: { K: boolean; Q: boolean; k: boolean; q: boolean }
+  enPassant: string
+}
+
+const MAX_HISTORY = 100
+
 export function useChessBoard() {
   const [squares, setSquares] = useState<Board>({})
   const [turn, setTurn] = useState<'w' | 'b'>('w')
@@ -45,6 +55,9 @@ export function useChessBoard() {
     to: string
     color: 'w' | 'b'
   } | null>(null)
+  // Der Verlauf liegt in einem Ref, damit auch der „Rückgängig“-Knopf eines Hinweises den aktuellen Stand sieht.
+  const historyRef = useRef<PositionSnapshot[]>([])
+  const [historyLength, setHistoryLength] = useState(0)
   const [photoNotes, setPhotoNotes] = useState<{
     confidence: string
     corrections: string[]
@@ -81,16 +94,47 @@ export function useChessBoard() {
     }
   }, [editTool])
 
-  const playMove = (from: string, to: string, promotion?: PromotionPiece) => {
+  /** Merkt sich die aktuelle Stellung, bevor sie verändert wird. */
+  const pushHistory = () => {
+    historyRef.current = [
+      ...historyRef.current.slice(-(MAX_HISTORY - 1)),
+      { squares, turn, castling, enPassant },
+    ]
+    setHistoryLength(historyRef.current.length)
+  }
+
+  const clearHistory = () => {
+    historyRef.current = []
+    setHistoryLength(0)
+  }
+
+  /** Nimmt die letzte Änderung (Zug, Figur setzen) zurück. */
+  const undo = () => {
+    const last = historyRef.current[historyRef.current.length - 1]
+    if (!last) return
+    historyRef.current = historyRef.current.slice(0, -1)
+    setHistoryLength(historyRef.current.length)
+    setSquares(last.squares)
+    setTurn(last.turn)
+    setCastling(last.castling)
+    setEnPassant(last.enPassant)
+    setSelectedSquare(null)
+    setPendingPromotion(null)
+    setValidationErrors([])
+  }
+
+  const playMove = (from: string, to: string, promotion?: PromotionPiece): boolean => {
     const result = applyTapMove(editFen, squares, castling, from, to, promotion)
     setSelectedSquare(null)
     setPendingPromotion(null)
-    if (!result) return
+    if (!result) return false
+    pushHistory()
     setSquares(result.squares)
     setTurn(result.turn)
     setCastling(result.castling)
     setEnPassant(result.enPassant)
     setValidationErrors([])
+    return true
   }
 
   /** Tipp auf ein Feld ohne Werkzeug: Figur wählen, Zielfeld antippen = Zug ausführen. */
@@ -117,36 +161,30 @@ export function useChessBoard() {
   const cancelPromotion = () => setPendingPromotion(null)
 
   const setSquare = (sq: string, piece: string | null) => {
+    if ((squares[sq] ?? null) === piece) return
+    pushHistory()
     setSquares(prev => ({ ...prev, [sq]: piece }))
     setValidationErrors([])
   }
 
-  const resetBoard = (start: boolean, undo = true) => {
-    const previous = { squares, turn, castling, enPassant, editTool }
+  const resetBoard = (start: boolean, withUndo = true) => {
+    if (withUndo) pushHistory()
     setSquares(start ? squaresFromFen(START_FEN) : {})
     setTurn('w')
     setCastling({ K: start, Q: start, k: start, q: start })
     setEnPassant('')
     setEditTool(null)
     setValidationErrors([])
-    if (undo) {
+    if (withUndo) {
       toast.success(start ? 'Startaufstellung gesetzt' : 'Alle Figuren entfernt', {
-        action: {
-          label: 'Rückgängig',
-          onClick: () => {
-            setSquares(previous.squares)
-            setTurn(previous.turn)
-            setCastling(previous.castling)
-            setEnPassant(previous.enPassant)
-            setEditTool(previous.editTool)
-          },
-        },
+        action: { label: 'Rückgängig', onClick: undo },
       })
     }
   }
 
   const handleManualSetup = (start = false) => {
     resetBoard(start, false)
+    clearHistory()
     setPhotoNotes(null)
     setOrientation('white')
   }
@@ -173,6 +211,7 @@ export function useChessBoard() {
     setEditTool(null)
     setValidationErrors([])
     setPhotoNotes(null)
+    clearHistory()
     return true
   }
 
@@ -192,6 +231,11 @@ export function useChessBoard() {
     moveTargets,
     pendingPromotion,
     handleSquareTap,
+    playMove,
+    pushHistory,
+    undo,
+    clearHistory,
+    canUndo: historyLength > 0,
     completePromotion,
     cancelPromotion,
     buildFenFromSquares,
