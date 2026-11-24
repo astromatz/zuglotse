@@ -1,4 +1,5 @@
-import { Info } from 'lucide-react'
+import { Info, Play } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { germanSan, formatEvaluation, evaluationPercent, evaluationLabel } from '@/lib/local-commentary'
 import type { StockfishCandidate } from '@/lib/stockfish-worker'
 
@@ -8,6 +9,8 @@ interface CandidateListProps {
   selectedCandidate: number
   analysisProgress: number
   onSelect: (index: number) => void
+  /** Spielt den Zug des Kandidaten auf dem Brett. */
+  onPlay: (index: number) => void
 }
 
 export function CandidateList({
@@ -16,6 +19,7 @@ export function CandidateList({
   selectedCandidate,
   analysisProgress,
   onSelect,
+  onPlay,
 }: CandidateListProps) {
   return (
     <section aria-label="Kandidatenzüge">
@@ -34,13 +38,16 @@ export function CandidateList({
 
       <div className="space-y-3">
         {candidates.map((candidate, i) => (
-          <button
+          <div
             key={i}
-            aria-pressed={selectedCandidate === i}
-            onClick={() => onSelect(i)}
-            className={`zl-panel w-full text-left p-5 transition-shadow ${
+            className={`zl-panel transition-shadow ${
               selectedCandidate === i ? 'ring-2 ring-primary' : 'hover:shadow-md'
             }`}
+          >
+          <button
+            aria-pressed={selectedCandidate === i}
+            onClick={() => onSelect(i)}
+            className="w-full text-left p-5 rounded-[inherit]"
           >
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3">
@@ -80,6 +87,19 @@ export function CandidateList({
               {evaluationLabel(fen, candidate)}
             </p>
           </button>
+          {selectedCandidate === i && analysisProgress >= 100 && (candidate.move?.length ?? 0) >= 4 && (
+            <div className="px-5 pb-5 -mt-1">
+              <Button
+                variant="secondary"
+                className="w-full min-h-11 rounded-xl"
+                onClick={() => onPlay(i)}
+              >
+                <Play className="size-4 mr-2" />
+                Diesen Zug spielen
+              </Button>
+            </div>
+          )}
+          </div>
         ))}
       </div>
 
