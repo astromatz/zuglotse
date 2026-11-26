@@ -22,14 +22,17 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
+  Square as StopIcon,
+  Wrench,
+  Play,
   AlertTriangle,
   CheckCircle2,
 } from 'lucide-react'
 import { Chess } from 'chess.js'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { validateFen, type PromotionPiece } from '@/lib/chess-utils'
-import { principalVariation } from '@/lib/local-commentary'
+import { validateFen, plausibleEnPassantSquares, sanitizeEnPassant, type PromotionPiece } from '@/lib/chess-utils'
+import { germanSan, principalVariation } from '@/lib/local-commentary'
 import { AI_KEY_STORAGE, PROVIDER_LABEL, imageToDataUrl, recognizeBoard, type AiSettings } from '@/lib/ai-providers'
 import { repairPosition, rowsToSquares } from '@/lib/position-repair'
 import { ClientOnly } from '@/components/client-only'
@@ -41,7 +44,7 @@ import { useStockfish } from '@/hooks/useStockfish'
 import { useAiExplanation } from '@/hooks/useAiExplanation'
 import { useHistory, type HistoryItem } from '@/hooks/useHistory'
 
-import { BoardPanel, type AnalyzeState, type BoardPreview } from '@/components/chess/BoardPanel'
+import { BoardPanel, type AnalyzeState, type BoardPreview, type GameStatus, type MainAction } from '@/components/chess/BoardPanel'
 import { CandidateList } from '@/components/chess/CandidateList'
 import { VariationPanel } from '@/components/chess/VariationPanel'
 import { OpeningTutorPanel } from '@/components/chess/OpeningTutorPanel'
@@ -52,11 +55,9 @@ import { HistoryDialog } from '@/components/chess/HistoryDialog'
 
 const PREFERENCES_KEY = 'zuglotse_preferences_v1'
 type Step = 'start' | 'work'
-type Panel = 'build' | 'analysis'
 
 export default function ChessApp() {
   const [step, setStep] = useState<Step>('start')
-  const [panel, setPanel] = useState<Panel>('build')
   // Stellung (FEN), für die zuletzt eine Analyse gestartet wurde. Weicht das Brett davon ab, ist die Analyse veraltet.
   const [analysisFen, setAnalysisFen] = useState<string | null>(null)
   const [depth, setDepth] = useState(18)
@@ -203,7 +204,6 @@ export default function ChessApp() {
     stockfish.reset()
     ai.reset()
     setAnalysisFen(null)
-    setPanel('build')
     setStep('work')
   }
 
@@ -244,6 +244,7 @@ export default function ChessApp() {
         issues: repaired.remainingIssues,
       })
       board.clearHistory()
+      board.setMode('setup')
       openWorkspace()
       toast.success('Stellung erkannt – bitte kurz prüfen')
     } catch (error) {
@@ -261,14 +262,15 @@ export default function ChessApp() {
     const val = validateFen(currentFen)
     if (!val.valid) {
       board.setValidationErrors(val.errors)
-      setPanel('build')
+      board.setMode('setup')
       toast.error(val.errors?.[0] ?? 'Ungültige Stellung')
       return
     }
     board.setValidationErrors([])
     stockfish.terminate()
     setAnalysisFen(currentFen)
-    setPanel('analysis')
+    // Nach dem Start der Analyse geht es ans Spielen: Kandidaten ansehen, Zug ausführen, weiterziehen.
+    board.setMode('play')
     ai.reset()
     window.scrollTo({ top: 0 })
 
@@ -276,6 +278,13 @@ export default function ChessApp() {
       hist.saveHistory(finalFen, { candidates: finalCandidates, fen: finalFen, bestMove })
       ai.requestAiExplanation(aiSettings, finalFen, finalCandidates)
     })
+  }
+
+  const cancelAnalysis = () => {
+    stockfish.terminate()
+    stockfish.reset()
+    setAnalysisFen(null)
+    toast('Analyse abgebrochen')
   }
 
   /** Spielt den Zug eines Kandidaten auf dem Brett; die Analyse gilt danach als veraltet. */
@@ -337,39 +346,70 @@ export default function ChessApp() {
     </div>
   )
 
-  const panelTabs = (
-    <div
-      role="tablist"
-      aria-label="Bereich"
-      className="flex bg-muted p-1 rounded-xl"
-    >
-      {(
-        [
-          ['build', 'Aufbau'],
-          ['analysis', 'Analyse'],
-        ] as const
-      ).map(([key, label]) => (
-        <button
-          key={key}
-          role="tab"
-          aria-selected={panel === key}
-          className={`flex-1 min-h-11 rounded-lg text-sm font-medium transition-shadow flex items-center justify-center gap-2 ${
-            panel === key ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'
-          }`}
-          onClick={() => setPanel(key)}
-        >
-          {label}
-          {key === 'analysis' && analyzeState === 'stale' && (
-            <span
-              className="size-2 rounded-full bg-amber-500"
-              role="img"
-              aria-label="Analyse veraltet"
-            />
-          )}
-        </button>
-      ))}
-    </div>
-  )
+  // Partiezustand der Brettstellung (für „Wer ist am Zug?“ und die Hauptschaltfläche)
+  const gameStatus = useMemo<GameStatus>(() => {
+    if (board.issues.length) return 'normal'
+    try {
+      const chess = new Chess(board.editFen)
+      if (chess.isCheckmate()) return 'checkmate'
+      if (chess.isStalemate()) return 'stalemate'
+      if (chess.isCheck()) return 'check'
+    } catch {}
+    return 'normal'
+  }, [board.editFen, board.issues])
+
+  // Die eine Hauptaktion – sie richtet sich nach dem Zustand.
+  const mainAction: MainAction = (() => {
+    const issue = board.issues[0]
+    if (issue) {
+      const fix = issue.fix
+      const toolActive = fix.kind === 'tool' && board.mode === 'setup' && board.editTool === fix.tool
+      return toolActive
+        ? { label: 'Jetzt aufs markierte Feld tippen', icon: <Wrench className="size-5" />, onClick: () => {}, disabled: true }
+        : { label: fix.label, icon: <Wrench className="size-5" />, onClick: () => board.applyFix(fix) }
+    }
+    if (analyzeState === 'running') {
+      return {
+        label: `Abbrechen · ${Math.round(stockfish.analysisProgress)} %`,
+        icon: <StopIcon className="size-4" />,
+        onClick: cancelAnalysis,
+        variant: 'secondary',
+      }
+    }
+    if (analyzeState === 'done') {
+      const cand = stockfish.candidates[stockfish.selectedCandidate]
+      if (cand && (cand.move?.length ?? 0) >= 4) {
+        const san = germanSan(cand.san || cand.move)
+        return {
+          label: stockfish.selectedCandidate === 0 ? `Besten Zug spielen: ${san}` : `Zug spielen: ${san}`,
+          icon: <Play className="size-5" />,
+          onClick: () => playCandidate(stockfish.selectedCandidate),
+        }
+      }
+    }
+    if (gameStatus === 'checkmate' || gameStatus === 'stalemate') {
+      return {
+        label: 'Partie beendet',
+        icon: <CheckCircle2 className="size-5" />,
+        onClick: () => {},
+        disabled: true,
+      }
+    }
+    return {
+      label: analyzeState === 'stale' ? 'Neu analysieren' : 'Analysieren',
+      icon: analyzeState === 'stale' ? <RefreshCw className="size-5" /> : <BarChart3 className="size-5" />,
+      onClick: startAnalysis,
+    }
+  })()
+
+  const castlingPossible = {
+    K: board.squares.e1 === 'wK' && board.squares.h1 === 'wR',
+    Q: board.squares.e1 === 'wK' && board.squares.a1 === 'wR',
+    k: board.squares.e8 === 'bK' && board.squares.h8 === 'bR',
+    q: board.squares.e8 === 'bK' && board.squares.a8 === 'bR',
+  }
+  const epOptions = plausibleEnPassantSquares(board.squares, board.turn)
+  const epValue = sanitizeEnPassant(board.squares, board.turn, board.enPassant)
 
   return (
     <ClientOnly
@@ -599,7 +639,10 @@ export default function ChessApp() {
               <div className="md:grid md:grid-cols-[1.12fr_1fr] gap-6 lg:gap-9 md:items-start">
                 <BoardPanel
                   analysisActive={fresh}
-                  analyzeState={analyzeState}
+                  mode={board.mode}
+                  issues={board.issues}
+                  mainAction={mainAction}
+                  gameStatus={gameStatus}
                   canUndo={board.canUndo}
                   showSizeToggle={fresh}
                   onUndo={board.undo}
@@ -609,11 +652,10 @@ export default function ChessApp() {
                   boardWidth={boardWidth}
                   boardContainerRef={boardContainerRef}
                   turn={board.turn}
-                  editTool={board.editTool}
+                  editTool={board.mode === 'setup' ? board.editTool : null}
                   candidates={stockfish.candidates}
                   selectedCandidate={stockfish.selectedCandidate}
                   analysisProgress={stockfish.analysisProgress}
-                  squares={board.squares}
                   boardSize={boardSize}
                   preview={preview}
                   selectedSquare={board.selectedSquare}
@@ -634,30 +676,14 @@ export default function ChessApp() {
                     setBoardSize((size) => (size === 'large' ? 'compact' : 'large'))
                   }
                   onPreviewClear={() => setPreviewPly(null)}
-                  onAnalyze={startAnalysis}
-                  onPieceDrop={(sourceSquare, targetSquare, piece) => {
-                    board.setSelectedSquare(null)
-                    board.pushHistory()
-                    board.setSquares((prev) => {
-                      const next = { ...prev, [sourceSquare]: null }
-                      if (targetSquare) next[targetSquare] = piece
-                      return next
-                    })
-                    board.setValidationErrors([])
-                    return true
-                  }}
-                  onSquareClick={(square) => {
-                    if (board.editTool) {
-                      board.setSquare(square, board.editTool === 'delete' ? null : board.editTool)
-                    } else {
-                      board.handleSquareTap(square)
-                    }
-                  }}
+                  onModeChange={board.setMode}
+                  onTurnChange={board.changeTurn}
+                  onPieceDrop={board.handleDrop}
+                  onSquareClick={board.handleSquareTap}
                 />
 
                 <div className="space-y-4 min-w-0 max-md:mt-4">
-                {panelTabs}
-                {panel === 'build' ? (
+                {board.mode === 'setup' ? (
                   <div className="space-y-4 min-w-0">
                     {board.photoNotes && (
                       <section
@@ -712,31 +738,16 @@ export default function ChessApp() {
                       onStart={() => board.resetBoard(true)}
                     />
 
-                    <section className="zl-panel p-5 sm:p-6 space-y-5">
-                      <div className="flex items-center justify-between gap-3">
-                        <h2 className="font-semibold text-sm">Wer ist am Zug?</h2>
-                        <div className="flex bg-muted p-1 rounded-xl" role="group" aria-label="Am Zug">
-                          {(['w', 'b'] as const).map((color) => (
-                            <button
-                              key={color}
-                              className={`min-h-10 px-4 rounded-lg text-sm font-medium transition-shadow ${
-                                board.turn === color
-                                  ? 'bg-card shadow-sm text-foreground'
-                                  : 'text-muted-foreground'
-                              }`}
-                              aria-pressed={board.turn === color}
-                              onClick={() => board.setTurn(color)}
-                            >
-                              {color === 'w' ? 'Weiß' : 'Schwarz'}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <details className="group border-t border-border/60 pt-4">
-                        <summary className="list-none cursor-pointer min-h-11 flex items-center justify-between text-sm font-medium">
-                          Weitere Stellungsdetails
-                          <ChevronDown className="size-4 group-open:rotate-180 transition-transform" />
+                    <section className="zl-panel p-5 sm:p-6 space-y-4">
+                      <details className="group">
+                        <summary className="list-none cursor-pointer min-h-11 flex items-center justify-between text-sm font-semibold">
+                          <span>
+                            Details
+                            <span className="block text-xs font-normal text-muted-foreground mt-0.5">
+                              Rochade, En passant, FEN, Suchtiefe – wird automatisch passend gesetzt
+                            </span>
+                          </span>
+                          <ChevronDown className="size-4 group-open:rotate-180 transition-transform shrink-0" />
                         </summary>
                         <div className="pt-4 space-y-5">
                           <fieldset>
@@ -752,12 +763,15 @@ export default function ChessApp() {
                               ).map(([key, label]) => (
                                 <label
                                   key={key}
-                                  className="flex items-center gap-2 min-h-11 text-sm"
+                                  className={`flex items-center gap-2 min-h-11 text-sm ${
+                                    castlingPossible[key] ? '' : 'text-muted-foreground'
+                                  }`}
                                 >
                                   <input
                                     type="checkbox"
                                     className="size-4 accent-primary"
-                                    checked={board.castling[key]}
+                                    disabled={!castlingPossible[key]}
+                                    checked={castlingPossible[key] && board.castling[key]}
                                     onChange={() =>
                                       board.setCastling((previous) => ({
                                         ...previous,
@@ -770,22 +784,34 @@ export default function ChessApp() {
                               ))}
                             </div>
                             <p className="text-xs text-muted-foreground leading-relaxed mt-2">
-                              Unmögliche Rochaderechte werden automatisch entfernt. Bereits
-                              gezogene Könige oder Türme musst du selbst berücksichtigen.
+                              Ausgegraut: König oder Turm stehen nicht auf ihrem Ausgangsfeld. Ob sie
+                              schon gezogen haben, kann das Brett nicht wissen – das kannst du hier
+                              abwählen.
                             </p>
                           </fieldset>
 
                           <label className="block text-sm font-medium">
-                            En-passant-Feld
-                            <input
-                              className="zl-input mt-2 font-mono"
-                              value={board.enPassant}
-                              onChange={(e) => board.setEnPassant(e.target.value)}
-                              placeholder="– (zum Beispiel e3)"
-                              maxLength={2}
-                              autoCapitalize="none"
-                              spellCheck={false}
-                            />
+                            En passant
+                            {epOptions.length ? (
+                              <select
+                                className="zl-input mt-2 font-mono"
+                                value={epValue === '-' ? '' : epValue}
+                                onChange={(e) => board.setEnPassant(e.target.value)}
+                              >
+                                <option value="">kein En-passant-Schlag</option>
+                                {epOptions.map((sq) => (
+                                  <option key={sq} value={sq}>
+                                    {sq}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="block text-xs font-normal text-muted-foreground mt-1">
+                                In dieser Stellung ist kein En-passant-Schlag möglich. Nach einem
+                                Bauern-Doppelschritt im Modus „Spielen“ wird das Feld automatisch
+                                gesetzt.
+                              </span>
+                            )}
                           </label>
 
                           <label className="block text-sm font-medium">
@@ -796,6 +822,21 @@ export default function ChessApp() {
                               value={board.editFen}
                               readOnly
                             />
+                          </label>
+
+                          <label className="flex items-center justify-between text-sm font-medium gap-4">
+                            Suchtiefe
+                            <select
+                              value={depth}
+                              onChange={(e) => setDepth(Number(e.target.value))}
+                              className="zl-input w-auto"
+                            >
+                              {[10, 14, 18, 22, 26].map((n) => (
+                                <option key={n} value={n}>
+                                  {n}
+                                </option>
+                              ))}
+                            </select>
                           </label>
 
                           <Button
@@ -809,71 +850,35 @@ export default function ChessApp() {
                         </div>
                       </details>
 
-                      <label className="flex items-center justify-between text-sm font-medium gap-4">
-                        Suchtiefe
-                        <select
-                          value={depth}
-                          onChange={(e) => setDepth(Number(e.target.value))}
-                          className="zl-input w-auto"
-                        >
-                          {[10, 14, 18, 22, 26].map((n) => (
-                            <option key={n} value={n}>
-                              {n}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
                       {errors}
 
-                      <Button
-                        className="zl-primary w-full"
-                        size="lg"
-                        disabled={analyzeState === 'running'}
-                        onClick={startAnalysis}
-                      >
-                        <BarChart3 className="size-5 mr-2" />
-                        {analyzeState === 'stale'
-                          ? 'Neu analysieren'
-                          : analyzeState === 'done'
-                          ? 'Erneut analysieren'
-                          : analyzeState === 'running'
-                          ? 'Analyse läuft …'
-                          : 'Stellung analysieren'}
-                        <ArrowRight className="size-4 ml-auto" />
-                      </Button>
-                      <p className="text-xs text-muted-foreground text-center">
+                      <p className="text-xs text-muted-foreground leading-relaxed border-t border-border/60 pt-4">
+                        Fertig aufgebaut? Unter dem Brett auf „Analysieren“ tippen oder zu
+                        „Spielen“ wechseln, um regelgerecht weiterzuziehen.
                         {aiActive
-                          ? `Stockfish auf deinem Gerät · Erklärung von ${PROVIDER_LABEL[aiSettings.provider]}`
-                          : 'Ohne KI · Keine API nötig'}
+                          ? ` Stockfish rechnet auf deinem Gerät, die Erklärung kommt von ${PROVIDER_LABEL[aiSettings.provider]}.`
+                          : ' Stockfish rechnet auf deinem Gerät, ohne KI und ohne API.'}
                       </p>
                     </section>
                   </div>
                 ) : analysisFen === null ? (
-                  <div className="zl-panel p-6 space-y-4">
+                  <div className="zl-panel p-6 space-y-3">
                     <h2 className="font-display text-xl font-bold tracking-tight">Noch keine Analyse</h2>
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      Baue oder verändere die Stellung auf dem Brett und lass Stockfish die besten
-                      Züge suchen.
+                      Ziehe abwechselnd für beide Seiten oder tippe unter dem Brett auf
+                      „Analysieren“, damit Stockfish die besten Züge sucht.
                     </p>
-                    <Button className="zl-primary w-full" size="lg" onClick={startAnalysis}>
-                      <BarChart3 className="size-5 mr-2" />
-                      Stellung analysieren
-                    </Button>
                   </div>
                 ) : !fresh ? (
-                  <div className="zl-panel p-6 space-y-4" role="status">
+                  <div className="zl-panel p-6 space-y-3" role="status">
                     <h2 className="font-display text-xl font-bold tracking-tight">
                       Die Stellung hat sich geändert
                     </h2>
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      Die bisherige Analyse passt nicht mehr zum Brett und ist ausgeblendet. Mit
-                      „Zurücknehmen“ kommst du zur analysierten Stellung zurück.
+                      Die bisherige Analyse passt nicht mehr zum Brett und ist ausgeblendet. Tippe
+                      unter dem Brett auf „Neu analysieren“ – oder geh mit „Zurücknehmen“ zur
+                      analysierten Stellung zurück.
                     </p>
-                    <Button className="zl-primary w-full" size="lg" onClick={startAnalysis}>
-                      <RefreshCw className="size-5 mr-2" />
-                      Neu analysieren
-                    </Button>
                   </div>
                 ) : (
                   <div className="space-y-5 min-w-0">

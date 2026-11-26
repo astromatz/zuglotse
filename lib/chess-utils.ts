@@ -66,6 +66,67 @@ export function sanitizeEnPassant(squares: SquareMap, turn: 'w' | 'b', enPassant
   return capturer ? ep : '-'
 }
 
+export interface ParsedFen {
+  squares: SquareMap
+  turn: 'w' | 'b'
+  castling: { K: boolean; Q: boolean; k: boolean; q: boolean }
+  enPassant: string
+}
+
+/**
+ * Liest eine FEN tolerant ein: Nur die acht Brettreihen sind Pflicht. Fehlende Angaben
+ * (Zugrecht, Rochade, En passant, Zähler) werden ergänzt, unplausible Rochade- und
+ * En-passant-Angaben stillschweigend verworfen. Ob die Stellung selbst regelkonform ist
+ * (Könige, Bauern, Schach), prüft das Brett danach sichtbar.
+ */
+export function parseFenLenient(input: string): { ok: true; value: ParsedFen } | { ok: false; error: string } {
+  const parts = (input ?? '').trim().split(/\s+/).filter(Boolean)
+  const rows = (parts[0] ?? '').split('/')
+  if (rows.length !== 8) {
+    return { ok: false, error: 'Die FEN braucht acht durch „/“ getrennte Brettreihen (zum Beispiel rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR).' }
+  }
+  const map: Record<string, string> = { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N', p: 'P' }
+  const squares: SquareMap = {}
+  for (let i = 0; i < 8; i++) {
+    let col = 0
+    for (const ch of rows[i]) {
+      if (/[1-8]/.test(ch)) {
+        for (let k = 0; k < Number(ch); k++) if (col + k < 8) squares[`${'abcdefgh'[col + k]}${8 - i}`] = null
+        col += Number(ch)
+      } else if (map[ch.toLowerCase()]) {
+        if (col < 8) squares[`${'abcdefgh'[col]}${8 - i}`] = `${ch === ch.toUpperCase() ? 'w' : 'b'}${map[ch.toLowerCase()]}`
+        col++
+      } else {
+        return { ok: false, error: `Unbekanntes Zeichen „${ch}“ in Reihe ${8 - i}. Erlaubt sind K, D/Q, T/R, L/B, S/N, P (Weiß groß, Schwarz klein) und Ziffern.` }
+      }
+    }
+    if (col !== 8) {
+      return { ok: false, error: `Reihe ${8 - i} hat ${col} statt 8 Felder.` }
+    }
+  }
+  const turnRaw = (parts[1] ?? 'w').toLowerCase()
+  if (turnRaw !== 'w' && turnRaw !== 'b') {
+    return { ok: false, error: `Nach den Brettreihen muss „w“ (Weiß am Zug) oder „b“ (Schwarz am Zug) stehen, nicht „${parts[1]}“.` }
+  }
+  const turn = turnRaw as 'w' | 'b'
+  const c = parts[2] ?? '-'
+  const flags = { K: c.includes('K'), Q: c.includes('Q'), k: c.includes('k'), q: c.includes('q') }
+  const castling = {
+    K: flags.K && squares.e1 === 'wK' && squares.h1 === 'wR',
+    Q: flags.Q && squares.e1 === 'wK' && squares.a1 === 'wR',
+    k: flags.k && squares.e8 === 'bK' && squares.h8 === 'bR',
+    q: flags.q && squares.e8 === 'bK' && squares.a8 === 'bR',
+  }
+  const ep = sanitizeEnPassant(squares, turn, parts[3] ?? '-')
+  return { ok: true, value: { squares, turn, castling, enPassant: ep === '-' ? '' : ep } }
+}
+
+/** Alle En-passant-Felder, die in dieser Stellung plausibel wären (für die Auswahl unter „Details“). */
+export function plausibleEnPassantSquares(squares: SquareMap, turn: 'w' | 'b'): string[] {
+  const rank = turn === 'w' ? '6' : '3'
+  return [...'abcdefgh'].map((f) => `${f}${rank}`).filter((sq) => sanitizeEnPassant(squares, turn, sq) === sq)
+}
+
 export function validateFen(fen: string): { valid: boolean; errors: string[] } {
   const errors: string[] = []
   const parts = fen?.trim().split(/\s+/) ?? []
@@ -184,6 +245,8 @@ export function getMoveTargets(fen: string, square: string): MoveTarget[] {
   try {
     const targets = new Map<string, MoveTarget>()
     for (const move of loaded.chess.moves({ square: square as any, verbose: true })) {
+      // Ein König kann nie geschlagen werden (tritt nur in unmöglichen Stellungen auf).
+      if (move.captured === 'k') continue
       const existing = targets.get(move.to)
       targets.set(move.to, {
         square: move.to,
@@ -233,7 +296,8 @@ export function applyTapMove(
 
   if (strict) {
     try {
-      chess.move({ from, to, promotion })
+      const move = chess.move({ from, to, promotion })
+      if (move.captured === 'k') return null
     } catch {
       return null
     }
@@ -250,6 +314,7 @@ export function applyTapMove(
   // Unvollständige Stellung: Figur einfach versetzen.
   const piece = squares[from]
   if (!piece) return null
+  if (squares[to]?.[1] === 'K') return null
   const next: SquareMap = { ...squares, [from]: null }
   const lastRank = color === 'w' ? '8' : '1'
   next[to] = piece[1] === 'P' && to[1] === lastRank ? `${color}${(promotion ?? 'q').toUpperCase()}` : piece
