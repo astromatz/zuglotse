@@ -15,7 +15,9 @@
 ## ✨ Funktionen
 
 * **Stellung aufbauen:** Figuren per Palette setzen, aus der Startaufstellung beginnen, eine FEN einfügen oder (mit eigenem KI-Schlüssel) ein Foto des Bretts erkennen lassen.
-* **Ziehen per Fingertipp:** Figur antippen → graue Punkte zeigen die möglichen Züge → Zielfeld antippen führt den Zug aus (inklusive Rochade, En passant und Umwandlungsauswahl). Das funktioniert auch für die Seite, die gerade nicht am Zug ist. Freies Ziehen mit dem Finger bleibt möglich.
+* **Zwei Modi – „Aufbauen“ und „Spielen“:** Beim Aufbauen werden Figuren frei gesetzt, versetzt und entfernt, das Zugrecht ist umschaltbar. Beim Spielen zieht nur die Seite am Zug, und zwar regelkonform: Figur antippen → graue Punkte zeigen die möglichen Züge → Zielfeld antippen (inklusive Rochade, En passant und Umwandlungsauswahl).
+* **Eine Hauptschaltfläche unter dem Brett:** Sie zeigt immer den sinnvollsten nächsten Schritt – Stellungsfehler beheben, analysieren, laufende Analyse abbrechen oder den besten Zug spielen.
+* **Stellungsfehler auf dem Brett:** Fehlt ein König, steht ein Bauer auf der Grundreihe oder steht die falsche Seite im Schach, werden die Felder rot markiert und die Korrektur liegt auf der Hauptschaltfläche. Rochade und En passant hält die App automatisch plausibel (einsehbar unter „Details“).
 * **Analyse mit Stockfish:** Die Engine läuft lokal als WebAssembly im Browser und liefert die drei besten Kandidatenzüge mit Bewertung, Pfeilen auf dem Brett und Hauptvariante. Ein Tipp auf einen Variantenzug zeigt die Stellung dazu als Vorschau.
 * **Dialog statt Einbahnstraße:** Aufbauen, analysieren, einen Zug spielen („Diesen Zug spielen“), den Gegenzug selbst ziehen, neu analysieren – alles auf einem Arbeitsbrett. Ändert sich die Stellung, wird die Analyse als veraltet ausgeblendet (eine laufende Berechnung wird abgebrochen). Mit „Zurücknehmen“ geht es Schritt für Schritt zurück; kommt man auf die analysierte Stellung zurück, ist die Analyse sofort wieder gültig.
 * **Brett immer sichtbar:** Auf dem Smartphone bleibt das Brett oben am Bildschirm stehen, während du die Erläuterungen liest (umschaltbar zwischen groß und kompakt). Ab Tablet-Breite steht das Brett links, die Analyse rechts.
@@ -74,7 +76,7 @@ npm run build
 # Der fertige statische Build liegt anschließend im Ordner /out
 ```
 
-Den statischen Build kannst du lokal mit `npx serve out` testen.
+Den statischen Build kannst du lokal mit `npx serve out` testen. Tests der Stellungslogik: `npm test` (Node ≥ 22).
 
 **Technik:** Next.js 16 (statischer Export), React 19, TypeScript, Tailwind CSS 3.4, [chess.js](https://github.com/jhlywa/chess.js) für Regeln und Zuggenerierung, [react-chessboard](https://github.com/Clariity/react-chessboard) für das Brett, Stockfish (WebAssembly, Web Worker).
 
