@@ -5,6 +5,7 @@ import { Chess, type Square } from 'chess.js'
 import {
   squareMapToFen,
   sanitizeCastling,
+  sanitizeEnPassant,
   validateFen,
   getMoveTargets,
   applyTapMove,
@@ -64,18 +65,20 @@ export function useChessBoard() {
     issues: string[]
   } | null>(null)
 
-  const buildFenFromSquares = useCallback(() => {
-    const c = sanitizeCastling(squares, castling)
-    return squareMapToFen(squares, turn, c, enPassant.trim().toLowerCase() || '-')
-  }, [squares, turn, castling, enPassant])
-
+  // Rochade und En passant werden immer automatisch auf plausible Werte reduziert, damit nach
+  // manuellem Setzen/Entfernen/Verschieben oder Umschalten von „Am Zug“ keine unmögliche Stellung entsteht.
   const editFen = useMemo(
-    () => {
-      const c = sanitizeCastling(squares, castling)
-      return squareMapToFen(squares, turn, c, enPassant.trim().toLowerCase() || '-')
-    },
+    () =>
+      squareMapToFen(
+        squares,
+        turn,
+        sanitizeCastling(squares, castling),
+        sanitizeEnPassant(squares, turn, enPassant)
+      ),
     [squares, turn, castling, enPassant]
   )
+
+  const buildFenFromSquares = useCallback(() => editFen, [editFen])
 
   // Zielfelder der angetippten Figur (Punkte auf dem Brett)
   const moveTargets = useMemo(
