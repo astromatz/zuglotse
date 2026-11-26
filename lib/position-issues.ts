@@ -45,9 +45,9 @@ export function findPositionIssues(squares: SquareMap, turn: Color): PositionIss
       })
     } else if (kings.length > 1) {
       issues.push({
-        message: `${NAME[c]} hat ${kings.length} Könige – es darf nur einer sein.`,
+        message: `${NAME[c]} hat ${kings.length} Könige – nur einer ist erlaubt.`,
         squares: kings,
-        fix: { kind: 'tool', tool: 'delete', label: 'Überzähligen König antippen' },
+        fix: { kind: 'tool', tool: 'delete', label: 'König entfernen' },
       })
     }
   }
@@ -59,8 +59,8 @@ export function findPositionIssues(squares: SquareMap, turn: Color): PositionIss
     issues.push({
       message:
         edgePawns.length === 1
-          ? `Auf ${edgePawns[0]} steht ein Bauer – auf der ersten und letzten Reihe ist das unmöglich.`
-          : `Auf ${edgePawns.join(', ')} stehen Bauern – auf der ersten und letzten Reihe ist das unmöglich.`,
+          ? `Bauer auf ${edgePawns[0]} ist unmöglich (erste/letzte Reihe).`
+          : `Bauern auf ${edgePawns.join(', ')} sind unmöglich (erste/letzte Reihe).`,
       squares: edgePawns,
       fix: { kind: 'remove', squares: edgePawns, label: edgePawns.length === 1 ? 'Bauer entfernen' : 'Bauern entfernen' },
     })
@@ -72,7 +72,7 @@ export function findPositionIssues(squares: SquareMap, turn: Color): PositionIss
       issues.push({
         message: `${NAME[c]} hat ${pawns.length} Bauern – höchstens 8 sind möglich.`,
         squares: pawns,
-        fix: { kind: 'tool', tool: 'delete', label: 'Überzähligen Bauern antippen' },
+        fix: { kind: 'tool', tool: 'delete', label: 'Bauer entfernen' },
       })
     }
   }
@@ -84,7 +84,7 @@ export function findPositionIssues(squares: SquareMap, turn: Color): PositionIss
     const rankDist = Math.abs(Number(wk[0][1]) - Number(bk[0][1]))
     if (fileDist <= 1 && rankDist <= 1) {
       issues.push({
-        message: 'Die beiden Könige stehen direkt nebeneinander – das ist unmöglich.',
+        message: 'Die Könige stehen nebeneinander – das ist unmöglich.',
         squares: [wk[0], bk[0]],
         fix: { kind: 'tool', tool: 'delete', label: 'Stellung korrigieren' },
       })
@@ -111,7 +111,7 @@ export function findPositionIssues(squares: SquareMap, turn: Color): PositionIss
                 fix: { kind: 'tool', tool: 'delete', label: 'Stellung korrigieren' },
               }
             : {
-                message: `Der ${ADJ[other]} König steht im Schach. Dann muss ${NAME[other]} am Zug sein.`,
+                message: `Der ${ADJ[other]} König steht im Schach – also muss ${NAME[other]} am Zug sein.`,
                 squares: [otherKing, ...attackers],
                 fix: { kind: 'turn', turn: other, label: `${NAME[other]} an den Zug` },
               }

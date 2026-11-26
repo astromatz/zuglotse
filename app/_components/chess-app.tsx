@@ -365,11 +365,12 @@ export default function ChessApp() {
       const fix = issue.fix
       const toolActive = fix.kind === 'tool' && board.mode === 'setup' && board.editTool === fix.tool
       return toolActive
-        ? { label: 'Jetzt aufs markierte Feld tippen', icon: <Wrench className="size-5" />, onClick: () => {}, disabled: true }
-        : { label: fix.label, icon: <Wrench className="size-5" />, onClick: () => board.applyFix(fix) }
+        ? { kind: 'fix', label: fix.tool === 'delete' ? 'Markierte Figur antippen' : 'Jetzt auf ein Feld tippen', icon: <Wrench className="size-5" />, onClick: () => {}, disabled: true }
+        : { kind: 'fix', label: fix.label, icon: <Wrench className="size-5" />, onClick: () => board.applyFix(fix) }
     }
     if (analyzeState === 'running') {
       return {
+        kind: 'cancel',
         label: `Abbrechen · ${Math.round(stockfish.analysisProgress)} %`,
         icon: <StopIcon className="size-4" />,
         onClick: cancelAnalysis,
@@ -381,6 +382,7 @@ export default function ChessApp() {
       if (cand && (cand.move?.length ?? 0) >= 4) {
         const san = germanSan(cand.san || cand.move)
         return {
+          kind: 'play',
           label: stockfish.selectedCandidate === 0 ? `Besten Zug spielen: ${san}` : `Zug spielen: ${san}`,
           icon: <Play className="size-5" />,
           onClick: () => playCandidate(stockfish.selectedCandidate),
@@ -389,6 +391,7 @@ export default function ChessApp() {
     }
     if (gameStatus === 'checkmate' || gameStatus === 'stalemate') {
       return {
+        kind: 'over',
         label: 'Partie beendet',
         icon: <CheckCircle2 className="size-5" />,
         onClick: () => {},
@@ -396,6 +399,7 @@ export default function ChessApp() {
       }
     }
     return {
+      kind: 'analyze',
       label: analyzeState === 'stale' ? 'Neu analysieren' : 'Analysieren',
       icon: analyzeState === 'stale' ? <RefreshCw className="size-5" /> : <BarChart3 className="size-5" />,
       onClick: startAnalysis,

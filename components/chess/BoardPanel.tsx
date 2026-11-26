@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { AlertTriangle, Maximize2, Minimize2, PenTool, Play, RotateCcw, Undo2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -66,6 +67,8 @@ export type AnalyzeState = 'idle' | 'stale' | 'running' | 'done'
 
 /** Die eine wichtigste Aktion – abhängig vom Zustand (korrigieren, analysieren, abbrechen, Zug spielen). */
 export interface MainAction {
+  /** Art der Aktion; wechselt sie, ist die Schaltfläche kurz gesperrt (kein versehentlicher Tipp). */
+  kind: 'fix' | 'analyze' | 'cancel' | 'play' | 'over'
   label: string
   icon: React.ReactNode
   onClick: () => void
@@ -193,6 +196,18 @@ export function BoardPanel({
   }
 
   const position = preview ? preview.fen : editFen
+
+  // Wechselt die Hauptaktion (z. B. „Abbrechen“ → „Zug spielen“, weil die Analyse gerade fertig wurde),
+  // nimmt die Schaltfläche für einen Moment keine Tipps an – sonst löst ein Tipp die falsche Aktion aus.
+  const [guard, setGuard] = useState(false)
+  const lastKind = useRef(mainAction.kind)
+  useEffect(() => {
+    if (lastKind.current === mainAction.kind) return
+    lastKind.current = mainAction.kind
+    setGuard(true)
+    const t = setTimeout(() => setGuard(false), 600)
+    return () => clearTimeout(t)
+  }, [mainAction.kind])
 
   return (
     <div className="zl-panel zl-board-dock p-3 sm:p-5">
@@ -357,8 +372,7 @@ export function BoardPanel({
             {issues[0].message}
             {issues.length > 1 && (
               <span className="text-muted-foreground font-normal">
-                {' '}
-                (+{issues.length - 1} weitere{issues.length > 2 ? '' : 'r'} Hinweis{issues.length > 2 ? 'e' : ''})
+                {' '}· noch {issues.length - 1} Hinweis{issues.length > 2 ? 'e' : ''}
               </span>
             )}
           </span>
@@ -371,7 +385,10 @@ export function BoardPanel({
           className="zl-primary flex-1 min-w-0 h-auto whitespace-normal leading-tight px-3 py-2"
           variant={mainAction.variant ?? 'default'}
           disabled={mainAction.disabled}
-          onClick={mainAction.onClick}
+          aria-disabled={guard || undefined}
+          onClick={() => {
+            if (!guard) mainAction.onClick()
+          }}
         >
           {mainAction.icon}
           <span className="min-w-0">{mainAction.label}</span>
