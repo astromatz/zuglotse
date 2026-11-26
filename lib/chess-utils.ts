@@ -43,6 +43,29 @@ export function sanitizeCastling(squares: SquareMap, flags: { K: boolean; Q: boo
   return res || '-'
 }
 
+/**
+ * Behält das En-passant-Feld nur, wenn es zur Stellung passt; sonst "-".
+ * Plausibel heißt: richtige Reihe passend zum Zugrecht, gegnerischer Bauer direkt davor,
+ * Zielfeld und Ausgangsfeld des Doppelschritts leer und ein eigener Bauer, der schlagen kann.
+ */
+export function sanitizeEnPassant(squares: SquareMap, turn: 'w' | 'b', enPassant: string): string {
+  const ep = (enPassant ?? '').trim().toLowerCase()
+  if (!/^[a-h][36]$/.test(ep)) return '-'
+  const s = squares ?? {}
+  const file = ep[0]
+  const rank = Number(ep[1])
+  if (rank !== (turn === 'w' ? 6 : 3)) return '-'
+  const dir = turn === 'w' ? -1 : 1 // vom Zielfeld zum Bauern, der den Doppelschritt gemacht hat
+  const opponent = turn === 'w' ? 'b' : 'w'
+  if (s[`${file}${rank + dir}`] !== `${opponent}P`) return '-'
+  if (s[ep] || s[`${file}${rank - dir}`]) return '-'
+  const fi = file.charCodeAt(0)
+  const capturer = [fi - 1, fi + 1]
+    .filter((f) => f >= 97 && f <= 104)
+    .some((f) => s[`${String.fromCharCode(f)}${rank + dir}`] === `${turn}P`)
+  return capturer ? ep : '-'
+}
+
 export function validateFen(fen: string): { valid: boolean; errors: string[] } {
   const errors: string[] = []
   const parts = fen?.trim().split(/\s+/) ?? []
