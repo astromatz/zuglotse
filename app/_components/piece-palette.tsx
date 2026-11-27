@@ -13,15 +13,14 @@ export function PiecePalette({ tool, onTool, onClear, onStart }: {
   onClear: () => void
   onStart: () => void
 }) {
-  return <section className="zl-panel p-5 sm:p-6" aria-label="Figurenauswahl">
-    <h3 className="font-semibold text-lg tracking-tight">Deine Figuren</h3>
-    <p className="text-sm text-muted-foreground mt-1 mb-5">Figur wählen, dann auf ein Feld tippen.</p>
-    {(['w', 'b'] as const).map(color => <div key={color} className="mb-4">
-      <p className="zl-eyebrow mb-2">{color === 'w' ? 'Weiß' : 'Schwarz'}</p>
+  return <section className="zl-panel p-3 sm:p-4" aria-label="Figurenauswahl">
+    <h3 className="text-sm font-medium mb-2">Figur wählen, dann aufs Feld tippen.</h3>
+    {(['w', 'b'] as const).map(color => <div key={color} className="mb-2">
+      <p className="text-xs font-medium text-muted-foreground mb-1">{color === 'w' ? 'Weiß' : 'Schwarz'}</p>
       <div className="grid grid-cols-6 gap-1.5">
         {pieces.map(type => {
           const id = color + type
-          const label = `${color === 'w' ? 'Weißer' : 'Schwarzer'} ${names[type]}`
+          const label = `${color === 'w' ? (type === 'Q' ? 'Weiße' : 'Weißer') : (type === 'Q' ? 'Schwarze' : 'Schwarzer')} ${names[type]}`
           return <button type="button" key={id} title={label} aria-label={label} aria-pressed={tool === id}
             onClick={() => onTool(tool === id ? null : id)}
             className={`zl-piece ${tool === id ? 'bg-primary/10 ring-2 ring-primary text-primary' : 'bg-muted/70 text-foreground hover:bg-muted'}`}>
@@ -30,11 +29,11 @@ export function PiecePalette({ tool, onTool, onClear, onStart }: {
         })}
       </div>
     </div>)}
-    <div className="grid grid-cols-2 gap-2 mt-2 mb-5">
+    <div className="grid grid-cols-2 gap-2 mt-3 mb-3">
       <Button variant={tool === null ? 'secondary' : 'ghost'} aria-pressed={tool === null} className="min-h-11 rounded-xl" onClick={() => onTool(null)}><Move className="size-4 mr-2" /> Verschieben</Button>
       <Button variant={tool === 'delete' ? 'secondary' : 'ghost'} aria-pressed={tool === 'delete'} className="min-h-11 rounded-xl" onClick={() => onTool(tool === 'delete' ? null : 'delete')}><Eraser className="size-4 mr-2" /> Figur entfernen</Button>
     </div>
-    <div className="grid grid-cols-2 gap-2 border-t border-border/60 pt-5">
+    <div className="grid grid-cols-2 gap-2 border-t border-border/60 pt-3">
       <Button variant="secondary" className="min-h-12 rounded-xl gap-2 px-2 max-[360px]:flex-col max-[360px]:py-3" onClick={onClear}><Trash2 className="size-4 shrink-0" /> Feld leeren</Button>
       <Button variant="secondary" className="min-h-12 rounded-xl gap-2 px-2 max-[360px]:flex-col max-[360px]:py-3" onClick={onStart}><Grid2X2 className="size-4 shrink-0" /> Startaufstellung</Button>
     </div>

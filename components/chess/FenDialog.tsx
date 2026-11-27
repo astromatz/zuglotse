@@ -67,10 +67,12 @@ export function FenDialog({
             </div>
           )}
 
+          <div className="zl-sheet-footer">
           <Button type="submit" className="zl-primary w-full">
             <Check className="size-4 mr-2" />
             Stellung übernehmen
           </Button>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

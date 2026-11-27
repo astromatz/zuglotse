@@ -8,7 +8,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --no-warnings --test tests/position.test.mts"
+    "test": "node --experimental-strip-types --no-warnings --test tests/*.test.mts"
   },
   "devDependencies": {
     "@types/node": "22.0.0",
@@ -18,7 +18,7 @@
     "@typescript-eslint/parser": "8.18.0",
     "autoprefixer": "10.4.20",
     "eslint": "9.33.0",
-    "eslint-config-next": "16.4.1",
+    "eslint-config-next": "16.4.6",
     "postcss": "8.4.47",
     "tailwind-merge": "2.5.2",
     "tailwindcss": "3.4.0",
@@ -26,20 +26,20 @@
     "typescript": "5.6.3"
   },
   "dependencies": {
-    "@radix-ui/react-dialog": "1.1.1",
+    "@radix-ui/react-dialog": "1.3.1",
     "@radix-ui/react-slot": "1.1.0",
     "chess.js": "^1.4.0",
     "class-variance-authority": "0.7.0",
     "clsx": "2.1.1",
     "lucide-react": "0.446.0",
-    "next": "16.4.1",
+    "next": "16.4.6",
     "next-themes": "0.4.0",
     "react": "19.2.8",
     "react-chessboard": "^5.12.1",
     "react-dom": "19.2.8",
-    "sonner": "1.5.0",
+    "sonner": "2.0.8",
     "stockfish": "^19.0.1",
-    "webpack": "5.99.5"
+    "webpack": "5.113.0"
   },
   "engines": {
     "node": ">=20.9.0"

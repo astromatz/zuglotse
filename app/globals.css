@@ -196,6 +196,7 @@ select.zl-input { width: auto; }
 .zuglotse-app button:focus-visible, .zuglotse-app summary:focus-visible, .zuglotse-sheet button:focus-visible, .zl-input:focus-visible {
   outline: 2px solid hsl(var(--ring)); outline-offset: 4px;
 }
+.zuglotse-app [role='button']:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 4px; }
 .zuglotse-sheet {
   top: auto; bottom: 0; left: 50%; transform: translate(-50%, 0);
   max-width: 560px; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain;
@@ -216,11 +217,34 @@ select.zl-input { width: auto; }
   .zuglotse-app *, .zuglotse-sheet { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-/* Brett bleibt beim Scrollen sichtbar.
-   Handy hochkant: Brett als feste Leiste oben (Höhe begrenzt, groß oder kompakt).
-   Ab 768 px: zweispaltig, Brett klebt in der linken Spalte. */
-.zl-board-dock { position: sticky; top: 0; z-index: 30; }
+/* Cards react to their own width, including inside the tablet's narrow right column. */
+.zl-opening-panel { container-type: inline-size; }
+.zl-candidate[aria-pressed='true'] { box-shadow: 0 0 0 2px hsl(var(--primary)), 0 2px 8px hsl(var(--foreground) / 0.04); }
+.zl-principle-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.zl-principle-grid > * { min-width: 0; overflow-wrap: anywhere; }
+@container (min-width: 480px) {
+  .zl-principle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* The action stays reachable while the dialog content scrolls. */
+.zl-sheet-footer {
+  position: sticky;
+  bottom: calc(-24px - env(safe-area-inset-bottom));
+  z-index: 2;
+  padding: 12px 0 calc(24px + env(safe-area-inset-bottom));
+  margin-bottom: calc(-24px - env(safe-area-inset-bottom));
+  background: hsl(var(--background));
+  box-shadow: 0 -8px 16px hsl(var(--background) / 0.95);
+}
+@media (min-width: 640px) {
+  .zl-sheet-footer { bottom: -32px; padding-bottom: 32px; margin-bottom: -32px; }
+}
+
+/* Budget for the complete dock: board, toolbar, turn control and action. */
+.zl-board-dock { position: sticky; top: 0; z-index: 30; min-width: 0; }
 .zl-board-wrap { max-width: 100%; }
+.zl-board-strip { flex-wrap: wrap; }
+.zl-board-strip > div:last-child { margin-left: auto; }
 @media (max-width: 767px) and (orientation: portrait) {
   .zl-panel.zl-board-dock {
     margin-inline: -1rem;
@@ -229,8 +253,9 @@ select.zl-input { width: auto; }
     background: hsl(var(--background));
     box-shadow: 0 1px 0 hsl(var(--border)), 0 8px 20px hsl(var(--foreground) / 0.07);
   }
-  .zl-board-wrap[data-size='large'] { max-width: max(220px, 42vh); max-width: max(220px, 42svh); }
-  .zl-board-wrap[data-size='compact'] { max-width: max(140px, 26vh); max-width: max(140px, 26svh); }
+  .zl-board-wrap[data-size='large'] { max-width: clamp(232px, 36svh, 340px); }
+  .zl-board-wrap[data-size='compact'] { max-width: clamp(208px, 28svh, 272px); }
+  .zl-board-dock[data-mode='setup'] .zl-board-wrap { max-width: clamp(208px, 32svh, 300px); }
 }
 @media (min-width: 640px) and (max-width: 767px) and (orientation: portrait) {
   .zl-panel.zl-board-dock { margin-inline: -2rem; padding-inline: 2rem; }
@@ -238,7 +263,31 @@ select.zl-input { width: auto; }
 @media (max-width: 767px) and (orientation: landscape) {
   .zl-board-dock { position: static; }
 }
+@media (max-width: 360px) {
+  .zl-board-strip .size-11 { width: 40px; height: 40px; }
+}
 @media (min-width: 768px) {
-  .zl-board-dock { top: 6rem; z-index: auto; }
-  .zl-board-wrap { max-width: max(150px, calc(100vh - 250px)); max-width: max(150px, calc(100svh - 250px)); }
+  .zl-board-dock { top: 5rem; z-index: auto; }
+  .zl-board-wrap { max-width: max(208px, calc(100svh - 270px)); }
+}
+@media (min-width: 640px) and (max-height: 540px) {
+  .zuglotse-app .zl-header-bar { height: 44px; }
+  .zl-work-nav, .zl-work-intro { display: none; }
+  .zl-work-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 8px; }
+  .zl-work-content { margin-top: 0; }
+  .zl-panel.zl-board-dock { position: sticky; top: 52px; padding: 8px; margin-inline: 0; border-radius: 16px; }
+  .zl-board-wrap { max-width: max(120px, calc(100svh - var(--zl-board-overhead, 180px))); }
+  .zl-board-dock .zl-board-strip { margin-bottom: 8px; gap: 4px; }
+  .zl-board-strip .size-11 { width: 40px; height: 40px; }
+  .zl-board-strip button { min-height: 36px; }
+  .zl-board-strip [role='radiogroup'] { padding: 2px; }
+  .zl-board-strip [role='radio'] { padding-inline: 8px; }
+  .zl-board-strip [role='radio'] > span { display: none; }
+  .zl-board-dock .zl-turn-actions { margin-top: 8px; }
+  .zl-turn-actions .zl-primary, .zl-turn-actions > [role='status'] { min-height: 44px; }
+  .zl-turn-actions [role='radio'] { min-height: 32px; }
+  .zl-turn-actions .zl-eyebrow { display: none; }
+}
+@media (max-height: 300px) {
+  .zl-panel.zl-board-dock { position: static; }
 }

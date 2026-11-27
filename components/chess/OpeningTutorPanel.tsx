@@ -56,10 +56,10 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
   }
 
   return (
-    <section className="zl-panel p-5 sm:p-6" aria-label="Eröffnungs-Tutor & Prinzipien">
+    <section className="zl-panel zl-opening-panel p-4 sm:p-5" aria-label="Eröffnungs-Tutor & Prinzipien">
       {/* Kopfzeile mit Perspektiven-Umschalter */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <BookOpen className="size-5 text-primary" />
           <h2 className="font-display font-bold text-lg">Eröffnungs-Tutor</h2>
         </div>
@@ -74,7 +74,7 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
             type="button"
             aria-pressed={selectedSide === 'w'}
             onClick={() => setSelectedSide('w')}
-            className={`px-3 py-1 rounded-lg font-medium transition-all ${
+            className={`min-h-11 px-3 rounded-lg text-sm font-medium transition-all ${
               selectedSide === 'w'
                 ? 'bg-card text-foreground shadow-sm font-semibold'
                 : 'text-muted-foreground hover:text-foreground'
@@ -86,7 +86,7 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
             type="button"
             aria-pressed={selectedSide === 'b'}
             onClick={() => setSelectedSide('b')}
-            className={`px-3 py-1 rounded-lg font-medium transition-all ${
+            className={`min-h-11 px-3 rounded-lg text-sm font-medium transition-all ${
               selectedSide === 'b'
                 ? 'bg-card text-foreground shadow-sm font-semibold'
                 : 'text-muted-foreground hover:text-foreground'
@@ -211,16 +211,18 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
         </div>
 
         {/* 3. Die 4 Prinzipien-Karten */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="region" aria-label="Eröffnungsprinzipien">
+        <div className="zl-principle-grid" role="region" aria-label="Eröffnungsprinzipien">
           {/* Zentrumskontrolle */}
           <div
             className={`rounded-2xl p-4 border transition-all cursor-pointer ${
               expandedPrinciple === 'center' ? 'ring-1 ring-primary/40 bg-muted/60' : 'bg-muted/40 hover:bg-muted/50'
             }`}
+            role="button" tabIndex={0} aria-expanded={expandedPrinciple === 'center'}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePrinciple('center') } }}
             onClick={() => togglePrinciple('center')}
           >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Target className="size-4 text-primary" />
                 <h4 className="text-xs font-semibold">{report.center.title}</h4>
               </div>
@@ -245,10 +247,12 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
             className={`rounded-2xl p-4 border transition-all cursor-pointer ${
               expandedPrinciple === 'development' ? 'ring-1 ring-primary/40 bg-muted/60' : 'bg-muted/40 hover:bg-muted/50'
             }`}
+            role="button" tabIndex={0} aria-expanded={expandedPrinciple === 'development'}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePrinciple('development') } }}
             onClick={() => togglePrinciple('development')}
           >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Zap className="size-4 text-primary" />
                 <h4 className="text-xs font-semibold">{report.development.title}</h4>
               </div>
@@ -273,10 +277,12 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
             className={`rounded-2xl p-4 border transition-all cursor-pointer ${
               expandedPrinciple === 'kingSafety' ? 'ring-1 ring-primary/40 bg-muted/60' : 'bg-muted/40 hover:bg-muted/50'
             }`}
+            role="button" tabIndex={0} aria-expanded={expandedPrinciple === 'kingSafety'}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePrinciple('kingSafety') } }}
             onClick={() => togglePrinciple('kingSafety')}
           >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Shield className="size-4 text-primary" />
                 <h4 className="text-xs font-semibold">{report.kingSafety.title}</h4>
               </div>
@@ -301,10 +307,12 @@ export function OpeningTutorPanel({ fen }: OpeningTutorPanelProps) {
             className={`rounded-2xl p-4 border transition-all cursor-pointer ${
               expandedPrinciple === 'harmony' ? 'ring-1 ring-primary/40 bg-muted/60' : 'bg-muted/40 hover:bg-muted/50'
             }`}
+            role="button" tabIndex={0} aria-expanded={expandedPrinciple === 'harmony'}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePrinciple('harmony') } }}
             onClick={() => togglePrinciple('harmony')}
           >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Sparkles className="size-4 text-primary" />
                 <h4 className="text-xs font-semibold">{report.harmony.title}</h4>
               </div>

@@ -2,6 +2,8 @@
  * Stufe 2: Aufrufe mit dem eigenen Schlüssel der Nutzerin / des Nutzers.
  * Alle Anfragen gehen direkt vom Browser an Google bzw. OpenAI – kein Zuglotse-Server dazwischen.
  */
+import { runRequest } from '@/lib/async-request'
+
 export type AiProvider = 'gemini' | 'openai'
 export type SkillLevel = 'beginner' | 'intermediate' | 'advanced'
 export interface AiSettings {
@@ -40,13 +42,16 @@ async function readError(res: Response, provider: AiProvider): Promise<never> {
 }
 
 async function call(provider: AiProvider, url: string, init: RequestInit): Promise<any> {
-  let res: Response
-  try { res = await fetch(url, init) } catch (error) {
-    console.error(`Verbindung zu ${PROVIDER_LABEL[provider]} fehlgeschlagen:`, error)
-    throw new AiError(`${PROVIDER_LABEL[provider]} hat nicht geantwortet. Mögliche Ursachen: ungültiger Schlüssel, fehlendes Guthaben oder keine Internetverbindung. Prüfe den Schlüssel in den Einstellungen.`)
-  }
-  if (!res.ok) await readError(res, provider)
-  return res.json()
+  return runRequest(async (signal) => {
+    let res: Response
+    try { res = await fetch(url, { ...init, signal }) } catch (error) {
+      if (signal.aborted) throw error
+      console.error(`Verbindung zu ${PROVIDER_LABEL[provider]} fehlgeschlagen:`, error)
+      throw new AiError(`${PROVIDER_LABEL[provider]} hat nicht geantwortet. Mögliche Ursachen: ungültiger Schlüssel, fehlendes Guthaben oder keine Internetverbindung. Prüfe den Schlüssel in den Einstellungen.`)
+    }
+    if (!res.ok) await readError(res, provider)
+    return res.json()
+  }, init.signal ?? undefined)
 }
 
 const headers = (s: AiSettings): Record<string, string> => s.provider === 'gemini'
@@ -54,10 +59,10 @@ const headers = (s: AiSettings): Record<string, string> => s.provider === 'gemin
   : { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey.trim()}` }
 
 /** Prüft den Schlüssel und wählt ein verfügbares, günstiges Modell mit Bildverständnis. */
-export async function verifyKey(provider: AiProvider, apiKey: string): Promise<string> {
+export async function verifyKey(provider: AiProvider, apiKey: string, signal?: AbortSignal): Promise<string> {
   const s: AiSettings = { mode: 'key', provider, apiKey, model: '' }
   if (provider === 'gemini') {
-    const data = await call(provider, `${GEMINI}/models?pageSize=1000`, { headers: headers(s) })
+    const data = await call(provider, `${GEMINI}/models?pageSize=1000`, { headers: headers(s), signal })
     const names: string[] = (data?.models ?? [])
       .filter((m: any) => m?.supportedGenerationMethods?.includes('generateContent'))
       .map((m: any) => String(m.name).replace(/^models\//, ''))
@@ -66,13 +71,13 @@ export async function verifyKey(provider: AiProvider, apiKey: string): Promise<s
       .sort((a, b) => parseFloat(b.split('-')[1]) - parseFloat(a.split('-')[1]))
     return flash[0] ?? names.find(n => n.includes('flash')) ?? DEFAULT_MODELS.gemini
   }
-  const data = await call(provider, `${OPENAI}/models`, { headers: headers(s) })
+  const data = await call(provider, `${OPENAI}/models`, { headers: headers(s), signal })
   const ids: string[] = (data?.data ?? []).map((m: any) => String(m.id))
   return ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-mini'].find(id => ids.includes(id))
     ?? ids.find(id => /^gpt-[\d.o]+-mini$/.test(id)) ?? DEFAULT_MODELS.openai
 }
 
-async function generate(s: AiSettings, prompt: string, opts: { image?: string; json?: boolean }): Promise<string> {
+async function generate(s: AiSettings, prompt: string, opts: { image?: string; json?: boolean; signal?: AbortSignal }): Promise<string> {
   const model = s.model.trim() || DEFAULT_MODELS[s.provider]
   if (s.provider === 'gemini') {
     const parts: any[] = [{ text: prompt }]
@@ -81,7 +86,7 @@ async function generate(s: AiSettings, prompt: string, opts: { image?: string; j
       parts.push({ inline_data: { mime_type: meta.match(/data:(.*?);/)?.[1] ?? 'image/jpeg', data } })
     }
     const body = { contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.2, ...(opts.json ? { responseMimeType: 'application/json' } : {}) } }
-    const data = await call('gemini', `${GEMINI}/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: headers(s), body: JSON.stringify(body) })
+    const data = await call('gemini', `${GEMINI}/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: headers(s), body: JSON.stringify(body), signal: opts.signal })
     const text = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? '').join('').trim()
     if (!text) throw new AiError('Gemini hat keine Antwort geliefert. Möglicherweise wurde die Anfrage gefiltert.')
     return text
@@ -89,7 +94,7 @@ async function generate(s: AiSettings, prompt: string, opts: { image?: string; j
   const content: any[] = [{ type: 'text', text: prompt }]
   if (opts.image) content.push({ type: 'image_url', image_url: { url: opts.image, detail: 'high' } })
   const body = { model, messages: [{ role: 'user', content }], ...(opts.json ? { response_format: { type: 'json_object' } } : {}) }
-  const data = await call('openai', `${OPENAI}/chat/completions`, { method: 'POST', headers: headers(s), body: JSON.stringify(body) })
+  const data = await call('openai', `${OPENAI}/chat/completions`, { method: 'POST', headers: headers(s), body: JSON.stringify(body), signal: opts.signal })
   const text = String(data?.choices?.[0]?.message?.content ?? '').trim()
   if (!text) throw new AiError('OpenAI hat keine Antwort geliefert.')
   return text
@@ -117,8 +122,8 @@ Wenn kein Schachbrett zu sehen ist, antworte {"error":"kein Schachbrett"}.`
 
 export interface Recognition { ranks: string[]; turn: 'w' | 'b' | null; confidence: string }
 
-export async function recognizeBoard(s: AiSettings, imageDataUrl: string): Promise<Recognition> {
-  const parsed = parseJson(await generate(s, RECOGNITION_PROMPT, { image: imageDataUrl, json: true }))
+export async function recognizeBoard(s: AiSettings, imageDataUrl: string, signal?: AbortSignal): Promise<Recognition> {
+  const parsed = parseJson(await generate(s, RECOGNITION_PROMPT, { image: imageDataUrl, json: true, signal }))
   if (parsed?.error) throw new AiError('Auf dem Foto wurde kein Schachbrett erkannt. Fotografiere das Brett möglichst gerade von oben.')
   if (!Array.isArray(parsed?.ranks) || parsed.ranks.length !== 8) throw new AiError('Die Bilderkennung lieferte keine vollständige Stellung. Bitte versuche ein schärferes Foto.')
   return { ranks: parsed.ranks.map(String), turn: parsed.turn === 'w' || parsed.turn === 'b' ? parsed.turn : null, confidence: String(parsed.confidence ?? 'low') }
@@ -132,7 +137,7 @@ export interface ExplanationInput {
   skillLevel?: SkillLevel
 }
 
-export async function explainPosition(s: AiSettings, input: ExplanationInput): Promise<string[]> {
+export async function explainPosition(s: AiSettings, input: ExplanationInput, signal?: AbortSignal): Promise<string[]> {
   const level = input.skillLevel ?? s.skillLevel ?? 'beginner'
   const bestSan = input.candidates[0]?.san ?? 'des besten Zuges'
   const otherSide = input.sideToMove === 'Weiß' ? 'Schwarz' : 'Weiß'
@@ -176,7 +181,7 @@ STRIKTE REGELN ZUR VERMEIDUNG VON FEHLERN & HALLUZINATIONEN:
 6. Schreibe kurze, direkte Sätze. Keine Begrüßungsfloskeln.
 7. Kein Markdown, keine Überschriften, keine Aufzählungszeichen.`
 
-  const text = await generate(s, prompt, {})
+  const text = await generate(s, prompt, { signal })
   return text
     .split(/\n\s*\n|\n/)
     .map(p => p.replace(/^[*#\-\s]+/, '').replace(/\*\*/g, '').trim())

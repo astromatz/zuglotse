@@ -63,7 +63,7 @@ export interface BoardPreview {
 }
 
 /** idle: noch nie analysiert · stale: Stellung seit der Analyse verändert · running/done: Analyse der aktuellen Stellung */
-export type AnalyzeState = 'idle' | 'stale' | 'running' | 'done'
+export type AnalyzeState = 'idle' | 'stale' | 'running' | 'done' | 'error'
 
 /** Die eine wichtigste Aktion – abhängig vom Zustand (korrigieren, analysieren, abbrechen, Zug spielen). */
 export interface MainAction {
@@ -148,6 +148,26 @@ export function BoardPanel({
 }: BoardPanelProps) {
   // Bearbeiten ist immer möglich – nur nicht, solange eine Vorschau-Variante gezeigt wird.
   const editable = !preview
+  const dockRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const dock = dockRef.current
+    const wrap = boardContainerRef.current
+    if (!dock || !wrap) return
+    let frame = 0
+    const update = () => {
+      // Include wrapping labels, position errors and promotion controls in the height budget.
+      const overhead = dock.getBoundingClientRect().height - wrap.getBoundingClientRect().height
+      dock.style.setProperty('--zl-board-overhead', `${Math.ceil(overhead + 64)}px`)
+    }
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(update)
+    })
+    observer.observe(dock)
+    observer.observe(wrap)
+    update()
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [boardContainerRef])
   const bestCandidate = candidates[0]
   const evalPercent = analysisActive && bestCandidate ? evaluationPercent(fen, bestCandidate) : 50
 
@@ -210,7 +230,7 @@ export function BoardPanel({
   }, [mainAction.kind])
 
   return (
-    <div className="zl-panel zl-board-dock p-3 sm:p-5">
+    <div ref={dockRef} className="zl-panel zl-board-dock p-3 sm:p-4" data-mode={mode}>
       {promotion ? (
         <div className="zl-board-strip flex items-center justify-between gap-2 mb-2 md:mb-4 px-1">
           <span className="text-sm font-semibold truncate">Umwandeln in</span>
@@ -260,14 +280,14 @@ export function BoardPanel({
                 key={key}
                 role="radio"
                 aria-checked={mode === key}
-                className={`min-h-10 px-3 sm:px-4 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
+                className={`min-h-10 px-1.5 sm:px-3 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
                   mode === key
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => onModeChange(key)}
               >
-                {icon}
+                <span className="max-[360px]:hidden">{icon}</span>
                 {label}
               </button>
             ))}
@@ -379,7 +399,7 @@ export function BoardPanel({
         </p>
       )}
 
-      <div className="mt-2 md:mt-4 flex items-stretch gap-2">
+      <div className="zl-turn-actions mt-2 md:mt-3 flex items-stretch gap-2">
         <TurnControl mode={mode} turn={turn} gameStatus={issues.length ? 'normal' : gameStatus} onTurnChange={onTurnChange} />
         <Button
           className="zl-primary flex-1 min-w-0 h-auto whitespace-normal leading-tight px-3 py-2"
@@ -395,13 +415,6 @@ export function BoardPanel({
         </Button>
       </div>
 
-      <p className="text-xs text-muted-foreground text-center mt-4 max-md:hidden">
-        {preview
-          ? 'Vorschau einer Variante – „Zurück“ zeigt wieder deine Stellung.'
-          : mode === 'setup'
-          ? 'Aufbauen: Figur wählen und aufs Feld tippen. Ohne Werkzeug: Figur antippen, dann ein beliebiges Feld – sie wird ohne Regelprüfung versetzt.'
-          : 'Spielen: Figur der Seite am Zug antippen, graue Punkte zeigen die erlaubten Züge.'}
-      </p>
     </div>
   )
 }
@@ -438,7 +451,7 @@ function TurnControl({
               key={c}
               role="radio"
               aria-checked={turn === c}
-              className={`min-h-10 px-2.5 sm:px-3 rounded-lg text-[15px] font-semibold flex items-center gap-1.5 transition-colors ${
+              className={`min-h-10 px-2 rounded-lg text-sm font-semibold flex items-center gap-1 transition-colors ${
                 turn === c ? 'bg-card shadow-sm text-foreground ring-2 ring-primary' : 'text-muted-foreground'
               }`}
               onClick={() => onTurnChange(c)}

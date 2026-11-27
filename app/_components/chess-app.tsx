@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import {
   ArrowLeft,
-  ArrowRight,
   ArrowUpRight,
   BarChart3,
   Camera,
@@ -15,7 +14,6 @@ import {
   Compass,
   Cpu,
   Download,
-  Grid2X2,
   History,
   Loader2,
   PenTool,
@@ -79,6 +77,14 @@ export default function ChessApp() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const boardContainerRef = useRef<HTMLDivElement>(null)
+  const photoRequestRef = useRef<AbortController | null>(null)
+
+  const cancelPhotoRecognition = () => {
+    photoRequestRef.current?.abort()
+    photoRequestRef.current = null
+    setRecognizing(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   const board = useChessBoard()
   const stockfish = useStockfish(depth)
@@ -94,13 +100,16 @@ export default function ChessApp() {
       ? 'idle'
       : !fresh
       ? 'stale'
-      : stockfish.analysisProgress < 100
+      : stockfish.status === 'error'
+      ? 'error'
+      : stockfish.status === 'running'
       ? 'running'
       : 'done'
 
   // Wird die Stellung verändert, während Stockfish noch rechnet, wird die laufende Analyse abgebrochen.
   useEffect(() => {
-    if (analysisFen !== null && analysisFen !== board.editFen && stockfish.analysisProgress < 100) {
+    cancelPhotoRecognition()
+    if (analysisFen !== null && analysisFen !== board.editFen && stockfish.status === 'running') {
       stockfish.terminate()
       stockfish.reset()
       setAnalysisFen(null)
@@ -170,10 +179,14 @@ export default function ChessApp() {
       console.error('Lokale Einstellungen konnten nicht geladen werden:', error)
       setOnboarding(true)
     }
-    return () => stockfish.terminate()
+    return () => {
+      stockfish.terminate()
+      photoRequestRef.current?.abort()
+    }
   }, [])
 
   const saveSettings = (next: AiSettings) => {
+    cancelPhotoRecognition()
     setAiSettings(next)
     if (next.mode === 'none') ai.reset()
     try {
@@ -200,18 +213,23 @@ export default function ChessApp() {
 
   /** Öffnet den Arbeitsbildschirm mit frischem Stand (keine alte Analyse). */
   const openWorkspace = () => {
+    cancelPhotoRecognition()
     stockfish.terminate()
     stockfish.reset()
     ai.reset()
     setAnalysisFen(null)
     setStep('work')
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }
 
   const goToStart = () => {
+    cancelPhotoRecognition()
+    ai.reset()
     stockfish.terminate()
     stockfish.reset()
     setAnalysisFen(null)
     setStep('start')
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }
 
   const handlePhoto = async (file: File | undefined) => {
@@ -220,10 +238,15 @@ export default function ChessApp() {
       setSettingsOpen(true)
       return
     }
+    cancelPhotoRecognition()
+    const request = new AbortController()
+    photoRequestRef.current = request
     setRecognizing(true)
     try {
       const image = await imageToDataUrl(file)
-      const recognition = await recognizeBoard(aiSettings, image)
+      if (request.signal.aborted) return
+      const recognition = await recognizeBoard(aiSettings, image, request.signal)
+      if (photoRequestRef.current !== request || request.signal.aborted) return
       const raw = rowsToSquares(recognition.ranks)
       if (!raw)
         throw new Error(
@@ -248,11 +271,11 @@ export default function ChessApp() {
       openWorkspace()
       toast.success('Stellung erkannt – bitte kurz prüfen')
     } catch (error) {
+      if (request.signal.aborted) return
       console.error('Foto-Erkennung fehlgeschlagen:', error)
       toast.error(error instanceof Error ? error.message : 'Die Foto-Erkennung ist fehlgeschlagen.')
     } finally {
-      setRecognizing(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (photoRequestRef.current === request) cancelPhotoRecognition()
     }
   }
 
@@ -377,13 +400,16 @@ export default function ChessApp() {
         variant: 'secondary',
       }
     }
+    if (analyzeState === 'error') {
+      return { kind: 'analyze', label: 'Erneut analysieren', icon: <RefreshCw className="size-5" />, onClick: startAnalysis }
+    }
     if (analyzeState === 'done') {
       const cand = stockfish.candidates[stockfish.selectedCandidate]
       if (cand && (cand.move?.length ?? 0) >= 4) {
         const san = germanSan(cand.san || cand.move)
         return {
           kind: 'play',
-          label: stockfish.selectedCandidate === 0 ? `Besten Zug spielen: ${san}` : `Zug spielen: ${san}`,
+          label: `Zug spielen: ${san}`,
           icon: <Play className="size-5" />,
           onClick: () => playCandidate(stockfish.selectedCandidate),
         }
@@ -427,7 +453,7 @@ export default function ChessApp() {
     >
       <div className="zuglotse-app min-h-screen bg-muted/35 text-foreground flex flex-col">
         <header className="md:sticky md:top-0 z-40 bg-background/85 backdrop-blur-xl">
-          <div className="max-w-6xl mx-auto px-4 sm:px-8 h-14 md:h-[76px] flex items-center justify-between gap-3">
+          <div className="zl-header-bar max-w-6xl mx-auto px-4 sm:px-8 h-14 md:h-16 flex items-center justify-between gap-3">
             <button
               className="flex items-center gap-2.5 rounded-xl text-left min-h-11"
               aria-label="Zuglotse – Startseite"
@@ -473,18 +499,17 @@ export default function ChessApp() {
         <main className="w-full max-w-6xl mx-auto px-4 sm:px-8 flex-1 pb-12">
           {step === 'start' ? (
             <div className="pb-4">
-              <section className="hero-gradient text-center pt-12 sm:pt-20 pb-10 sm:pb-14">
-                <p className="zl-eyebrow text-primary mb-5">Dein persönlicher Schachkompass</p>
-                <h1 className="font-display text-[2.6rem] sm:text-6xl font-bold tracking-[-0.045em] leading-[1.08]">
+              <section className="hero-gradient text-center pt-6 sm:pt-9 pb-6 sm:pb-8">
+                <p className="zl-eyebrow text-primary mb-3">Dein persönlicher Schachkompass</p>
+                <h1 className="font-display text-[2rem] sm:text-5xl font-bold tracking-[-0.045em] leading-[1.08]">
                   Dein nächster Zug.
                   <br />
                   <span className="text-primary">Klar vor Augen.</span>
                 </h1>
-                <p className="text-muted-foreground mt-6 max-w-md mx-auto leading-relaxed text-base sm:text-lg">
-                  Jede Stellung hat Möglichkeiten. Entdecke deine besten Züge – und verstehe, was
-                  sie stark macht.
+                <p className="text-muted-foreground mt-3 max-w-md mx-auto leading-relaxed text-base">
+                  Entdecke deine besten Züge – und verstehe, was sie stark macht.
                 </p>
-                <div className="flex justify-center flex-wrap gap-4 sm:gap-6 text-xs text-muted-foreground mt-7">
+                <div className="flex justify-center flex-wrap gap-3 sm:gap-6 text-xs text-muted-foreground mt-4">
                   <span className="flex items-center gap-1.5">
                     <Cpu className="size-4 text-primary" />
                     Stockfish an Bord
@@ -500,17 +525,12 @@ export default function ChessApp() {
                 aria-label="Neue Analyse"
                 className="grid md:grid-cols-[1.18fr_1fr] gap-4 max-w-4xl mx-auto"
               >
-                <div className="zl-panel p-6 sm:p-8 flex flex-col items-start">
-                  <span className="zl-icon mb-5">
-                    <Grid2X2 className="size-6" />
-                  </span>
-                  <p className="zl-eyebrow mb-2">Ein Brett. Deine Ideen.</p>
-                  <h2 className="font-display text-2xl font-bold tracking-tight">
+                <div className="zl-panel p-4 sm:p-6 flex flex-col items-start">
+                  <h2 className="font-display text-xl font-bold tracking-tight">
                     Stellung aufbauen
                   </h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed mt-3 mb-7">
-                    Platziere deine Figuren ganz einfach per Fingertipp. Oder starte mit dem
-                    kompletten Schachspiel.
+                  <p className="text-sm text-muted-foreground leading-relaxed mt-2 mb-4">
+                    Figuren selbst setzen oder mit allen Figuren beginnen.
                   </p>
                   <Button
                     className="zl-primary w-full mt-auto"
@@ -522,7 +542,6 @@ export default function ChessApp() {
                   >
                     <PenTool className="size-4 mr-2" />
                     Brett öffnen
-                    <ArrowRight className="size-4 ml-auto" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -538,23 +557,19 @@ export default function ChessApp() {
 
                 <div className="flex flex-col gap-4">
                   <button
-                    className="zl-panel p-6 sm:p-7 text-left group hover:shadow-md transition-shadow flex-1"
+                    className="zl-panel p-4 sm:p-6 text-left group hover:shadow-md transition-shadow flex-1"
                     onClick={() => {
+                      cancelPhotoRecognition()
                       board.setValidationErrors([])
                       setFenOpen(true)
                     }}
                   >
-                    <div className="flex justify-between items-start">
-                      <span className="zl-icon">
-                        <Code2 className="size-6" />
-                      </span>
-                      <ArrowUpRight className="size-5 text-muted-foreground group-hover:text-primary" />
-                    </div>
-                    <h2 className="text-xl font-display font-bold tracking-tight mt-5">
+                    <h2 className="text-lg font-display font-bold tracking-tight flex items-center gap-2">
+                      <Code2 className="size-5 text-primary" />
                       FEN einfügen
                     </h2>
                     <p className="text-sm text-muted-foreground leading-relaxed mt-2">
-                      Du hast schon eine Stellung? Übernimm sie direkt als FEN-Zeichenkette.
+                      Eine vorhandene Stellung direkt übernehmen.
                     </p>
                   </button>
 
@@ -621,7 +636,7 @@ export default function ChessApp() {
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-4 py-2 md:py-8">
+              <div className="zl-work-nav flex items-center justify-between gap-4 py-1">
                 <Button variant="ghost" className="rounded-xl min-h-11 -ml-3" onClick={goToStart}>
                   <ArrowLeft className="size-4 mr-2" />
                   Zurück
@@ -629,20 +644,19 @@ export default function ChessApp() {
                 <p className="text-xs text-muted-foreground">Arbeitsbrett</p>
               </div>
 
-              <div className="max-md:sr-only md:mb-9">
-                <p className="zl-eyebrow text-primary mb-2">Dein Arbeitsbrett</p>
-                <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
-                  Aufbauen, analysieren, weiterspielen.
+              <div className="zl-work-intro sr-only">
+                <h1 className="font-display text-xl font-bold tracking-tight">
+                  Dein Arbeitsbrett
                 </h1>
-                <p className="text-muted-foreground text-sm mt-3">
+                <p className="sr-only">
                   Verändere die Stellung jederzeit – die Analyse gilt immer für das, was du auf dem
                   Brett siehst.
                 </p>
               </div>
 
-              <div className="md:grid md:grid-cols-[1.12fr_1fr] gap-6 lg:gap-9 md:items-start">
+              <div className="zl-work-grid md:grid md:grid-cols-[1.12fr_1fr] gap-4 lg:gap-6 md:items-start">
                 <BoardPanel
-                  analysisActive={fresh}
+                  analysisActive={fresh && stockfish.status !== 'error'}
                   mode={board.mode}
                   issues={board.issues}
                   mainAction={mainAction}
@@ -686,7 +700,7 @@ export default function ChessApp() {
                   onSquareClick={board.handleSquareTap}
                 />
 
-                <div className="space-y-4 min-w-0 max-md:mt-4">
+                <div className="zl-work-content space-y-4 min-w-0 max-md:mt-3">
                 {board.mode === 'setup' ? (
                   <div className="space-y-4 min-w-0">
                     {board.photoNotes && (
@@ -865,6 +879,11 @@ export default function ChessApp() {
                       </p>
                     </section>
                   </div>
+                ) : stockfish.error ? (
+                  <div className="zl-panel p-5 space-y-2" role="alert">
+                    <h2 className="font-semibold">Analyse unterbrochen</h2>
+                    <p className="text-sm text-muted-foreground">{stockfish.error}</p>
+                  </div>
                 ) : analysisFen === null ? (
                   <div className="zl-panel p-6 space-y-3">
                     <h2 className="font-display text-xl font-bold tracking-tight">Noch keine Analyse</h2>
@@ -886,44 +905,24 @@ export default function ChessApp() {
                   </div>
                 ) : (
                   <div className="space-y-5 min-w-0">
-                    {(
-                      <div className="zl-panel p-5">
-                        <div
-                          className="flex items-center justify-between gap-3 text-sm mb-3"
-                          role="status"
-                        >
-                          <span className="flex items-center gap-2 font-medium">
-                            {stockfish.analysisProgress < 100 ? (
-                              <Loader2 className="size-4 animate-spin text-primary" />
-                            ) : (
-                              <CheckCircle2 className="size-4 text-primary" />
-                            )}
-                            {stockfish.analysisProgress < 100
-                              ? 'Stockfish analysiert …'
-                              : 'Analyse abgeschlossen'}
-                          </span>
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {Math.round(stockfish.analysisProgress)} %
-                          </span>
-                        </div>
-                        <div
-                          role="progressbar"
-                          aria-label="Analysefortschritt"
-                          aria-valuenow={Math.round(stockfish.analysisProgress)}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          className="h-1.5 rounded-full bg-muted overflow-hidden"
-                        >
-                          <div
-                            className="bg-primary h-full rounded-full transition-all"
-                            style={{ width: `${stockfish.analysisProgress}%` }}
-                          />
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-3">
-                          Stockfish · Suchtiefe {depth} · Berechnung auf deinem Gerät
-                        </p>
+                    <div className="zl-panel px-4 py-3 space-y-2" role="status">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <span className="flex items-center gap-2 font-medium">
+                          {stockfish.status === 'running'
+                            ? <Loader2 className="size-4 animate-spin text-primary" />
+                            : <CheckCircle2 className="size-4 text-primary" />}
+                          {stockfish.status === 'running' ? 'Stockfish analysiert …' : 'Analyse abgeschlossen'}
+                        </span>
+                        <span className="text-xs text-muted-foreground">Tiefe {stockfish.analysisDepth}</span>
                       </div>
-                    )}
+                      {stockfish.status === 'running' && (
+                        <div role="progressbar" aria-label="Analysefortschritt"
+                          aria-valuenow={Math.round(stockfish.analysisProgress)} aria-valuemin={0} aria-valuemax={100}
+                          className="h-1 rounded-full bg-muted overflow-hidden">
+                          <div className="bg-primary h-full rounded-full transition-all" style={{ width: `${stockfish.analysisProgress}%` }} />
+                        </div>
+                      )}
+                    </div>
 
                     <CandidateList
                       fen={board.fen}
@@ -931,7 +930,6 @@ export default function ChessApp() {
                       selectedCandidate={stockfish.selectedCandidate}
                       analysisProgress={stockfish.analysisProgress}
                       onSelect={(i) => stockfish.setSelectedCandidate(i)}
-                      onPlay={playCandidate}
                     />
 
                     <VariationPanel
