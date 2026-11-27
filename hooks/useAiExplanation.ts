@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { explainPosition, type AiSettings } from '@/lib/ai-providers'
 import { germanSan, formatEvaluation, principalVariation, describePosition } from '@/lib/local-commentary'
 import type { StockfishCandidate } from '@/lib/stockfish-worker'
@@ -14,8 +14,12 @@ export type AiTextState =
 export function useAiExplanation() {
   const [aiText, setAiText] = useState<AiTextState>({ status: 'idle', lines: [] })
   const aiRequestRef = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
+  useEffect(() => () => controllerRef.current?.abort(), [])
 
   const reset = () => {
+    controllerRef.current?.abort()
+    controllerRef.current = null
     aiRequestRef.current++
     setAiText({ status: 'idle', lines: [] })
   }
@@ -29,6 +33,9 @@ export function useAiExplanation() {
     if (!aiActive || cands.length === 0) return
 
     const id = ++aiRequestRef.current
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
     setAiText({ status: 'loading', lines: [] })
     try {
       const lines = await explainPosition(aiSettings, {
@@ -41,9 +48,10 @@ export function useAiExplanation() {
         })),
         facts: describePosition(analysisFen, cands),
         skillLevel: aiSettings.skillLevel ?? 'beginner',
-      })
+      }, controller.signal)
       if (id === aiRequestRef.current) setAiText({ status: 'done', lines })
     } catch (error) {
+      if (controller.signal.aborted) return
       console.error('KI-Erklärung fehlgeschlagen:', error)
       if (id === aiRequestRef.current)
         setAiText({
@@ -52,6 +60,8 @@ export function useAiExplanation() {
           error:
             error instanceof Error ? error.message : 'Die KI-Erklärung ist fehlgeschlagen.',
         })
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null
     }
   }
 

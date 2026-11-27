@@ -20,9 +20,9 @@
 * **Stellungsfehler auf dem Brett:** Fehlt ein König, steht ein Bauer auf der Grundreihe oder steht die falsche Seite im Schach, werden die Felder rot markiert und die Korrektur liegt auf der Hauptschaltfläche. Rochade und En passant hält die App automatisch plausibel (einsehbar unter „Details“).
 * **Analyse mit Stockfish:** Die Engine läuft lokal als WebAssembly im Browser und liefert die drei besten Kandidatenzüge mit Bewertung, Pfeilen auf dem Brett und Hauptvariante. Ein Tipp auf einen Variantenzug zeigt die Stellung dazu als Vorschau.
 * **Dialog statt Einbahnstraße:** Aufbauen, analysieren, einen Zug spielen („Diesen Zug spielen“), den Gegenzug selbst ziehen, neu analysieren – alles auf einem Arbeitsbrett. Ändert sich die Stellung, wird die Analyse als veraltet ausgeblendet (eine laufende Berechnung wird abgebrochen). Mit „Zurücknehmen“ geht es Schritt für Schritt zurück; kommt man auf die analysierte Stellung zurück, ist die Analyse sofort wieder gültig.
-* **Brett immer sichtbar:** Auf dem Smartphone bleibt das Brett oben am Bildschirm stehen, während du die Erläuterungen liest (umschaltbar zwischen groß und kompakt). Ab Tablet-Breite steht das Brett links, die Analyse rechts.
+* **Brett und Bedienung im Blick:** Auf dem Smartphone bleibt das Brett oben am Bildschirm stehen, während du die Erläuterungen liest (umschaltbar zwischen groß und kompakt). Im Aufbau bleibt mehr Platz für die Figurenpalette. Ab Tablet-Breite und im breiten Smartphone-Querformat steht das Brett links, die Analyse rechts; bei sehr geringer Höhe lässt sich alles frei scrollen. Die Kandidaten sind kompakt auswählbar, gespielt wird mit der Hauptschaltfläche unter dem Brett.
 * **Erklärungen:** Deterministische deutsche Stellungskommentare und Eröffnungsprinzipien – ohne KI und ohne Netzwerk.
-* **Optionale KI-Erklärung:** Anbindung von Google Gemini oder OpenAI über den eigenen API-Schlüssel (Bring Your Own Key). Der Schlüssel bleibt im lokalen Browser-Speicher (`localStorage`).
+* **Optionale KI-Erklärung:** Anbindung von Google Gemini oder OpenAI über den eigenen API-Schlüssel (Bring Your Own Key). Der Schlüssel bleibt im lokalen Browser-Speicher (`localStorage`). Anfragen haben eine Zeitbegrenzung; beim Wechseln der Stellung oder des Arbeitsbereichs werden überholte Fotoantworten verworfen.
 * **Verlauf:** Analysierte Stellungen werden lokal gespeichert und lassen sich wieder öffnen. Export als FEN oder PGN.
 
 ## 🖼️ Ansichten
@@ -76,7 +76,7 @@ npm run build
 # Der fertige statische Build liegt anschließend im Ordner /out
 ```
 
-Den statischen Build kannst du lokal mit `npx serve out` testen. Tests der Stellungslogik: `npm test` (Node ≥ 22).
+Den statischen Build kannst du lokal mit `npx serve out` testen. Tests der Stellungslogik, des Engine-Starts, der Abbruchbehandlung und der Anfrage-Zeitbegrenzung: `npm test` (Node ≥ 22). Stockfish wartet auf `uciok` und `readyok`; nach einem Lade- oder Worker-Fehler lässt sich die Analyse ohne Neuladen erneut starten. Die angezeigte Suchtiefe bleibt der jeweiligen Berechnung zugeordnet.
 
 **Technik:** Next.js 16 (statischer Export), React 19, TypeScript, Tailwind CSS 3.4, [chess.js](https://github.com/jhlywa/chess.js) für Regeln und Zuggenerierung, [react-chessboard](https://github.com/Clariity/react-chessboard) für das Brett, Stockfish (WebAssembly, Web Worker).
 

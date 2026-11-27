@@ -5,16 +5,22 @@ import { Chess } from 'chess.js'
 import { toast } from 'sonner'
 import { parseInfoLine, type StockfishCandidate } from '@/lib/stockfish-worker'
 import { describePosition } from '@/lib/local-commentary'
+import { startEngineSession } from '@/lib/engine-session'
 
 export function useStockfish(depth: number) {
   const [candidates, setCandidates] = useState<StockfishCandidate[]>([])
   const [analysisProgress, setAnalysisProgress] = useState(0)
   const [selectedCandidate, setSelectedCandidate] = useState(0)
   const [commentary, setCommentary] = useState<string[]>([])
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [analysisDepth, setAnalysisDepth] = useState<number | null>(null)
   const stockfishRef = useRef<Worker | null>(null)
+  const sessionRef = useRef<ReturnType<typeof startEngineSession> | null>(null)
 
   const terminate = () => {
-    stockfishRef.current?.terminate()
+    sessionRef.current?.stop()
+    sessionRef.current = null
     stockfishRef.current = null
   }
 
@@ -23,13 +29,27 @@ export function useStockfish(depth: number) {
     setCommentary([])
     setAnalysisProgress(0)
     setSelectedCandidate(0)
+    setStatus('idle')
+    setError(null)
+    setAnalysisDepth(null)
   }
 
   const startAnalysis = (
     currentFen: string,
     onComplete: (fen: string, candidates: StockfishCandidate[], bestMove: string) => void
   ) => {
+    terminate()
     reset()
+    setStatus('running')
+    setAnalysisDepth(depth)
+    const fail = (message: string) => {
+      stockfishRef.current = null
+      setCandidates([])
+      setCommentary([])
+      setStatus('error')
+      setError(message)
+      toast.error(message)
+    }
     try {
       const getWorkerUrl = () => {
         if (typeof window === 'undefined') return '/stockfish-lite.js'
@@ -40,17 +60,9 @@ export function useStockfish(depth: number) {
       const worker = new Worker(getWorkerUrl())
       stockfishRef.current = worker
 
-      worker.onerror = (ev) => {
-        console.error('Stockfish worker error', ev?.message ?? ev)
-        toast.error('Die Schach-Engine konnte nicht gestartet werden. Bitte Seite neu laden.')
-        worker.terminate()
-      }
-
       const tempCandidates: Record<number, StockfishCandidate> = {}
 
-      worker.onmessage = (e: MessageEvent) => {
-        const line = e?.data ?? ''
-        if (typeof line !== 'string') return
+      sessionRef.current = startEngineSession(worker, currentFen, depth, (line) => {
 
         if (line.startsWith('info') && line.includes('multipv')) {
           const parsed = parseInfoLine(line)
@@ -84,7 +96,8 @@ export function useStockfish(depth: number) {
         if (line.startsWith('bestmove')) {
           const bestMove = line.split(' ')?.[1] ?? ''
           setAnalysisProgress(100)
-          worker.terminate()
+          stockfishRef.current = null
+          setStatus('done')
           const finalCandidates = Object.values(tempCandidates).sort(
             (a, b) => (a?.multipv ?? 0) - (b?.multipv ?? 0)
           )
@@ -92,17 +105,10 @@ export function useStockfish(depth: number) {
           setCommentary(describePosition(currentFen, finalCandidates))
           onComplete(currentFen, finalCandidates, bestMove)
         }
-      }
-
-      worker.postMessage('uci')
-      setTimeout(() => {
-        worker.postMessage('isready')
-        worker.postMessage(`setoption name MultiPV value 3`)
-        worker.postMessage(`position fen ${currentFen}`)
-        worker.postMessage(`go depth ${depth}`)
-      }, 100)
-    } catch (err: any) {
-      toast.error('Stockfish konnte nicht geladen werden')
+      }, fail)
+    } catch (err) {
+      terminate()
+      fail('Stockfish konnte nicht geladen werden. Bitte starte die Analyse erneut.')
       console.error(err)
     }
   }
@@ -113,6 +119,9 @@ export function useStockfish(depth: number) {
     selectedCandidate,
     setSelectedCandidate,
     commentary,
+    status,
+    error,
+    analysisDepth,
     stockfishRef,
     startAnalysis,
     terminate,

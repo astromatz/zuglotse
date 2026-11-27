@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, CheckCircle2, Copy, Cpu, ExternalLink, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -21,11 +21,18 @@ export function ModeSheet({ open, onboarding, settings, depth, onDepthChange, on
   const [draft, setDraft] = useState<AiSettings>(settings)
   const [showKey, setShowKey] = useState(false)
   const [checking, setChecking] = useState(false)
+  const checkRef = useRef<AbortController | null>(null)
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
 
   const [linkHint, setLinkHint] = useState(false)
 
-  useEffect(() => { if (open) { setDraft(settings); setStatus(null); setShowKey(false); setLinkHint(false) } }, [open, settings])
+  useEffect(() => {
+    checkRef.current?.abort()
+    checkRef.current = null
+    setChecking(false)
+    if (open) { setDraft(settings); setStatus(null); setShowKey(false); setLinkHint(false) }
+    return () => checkRef.current?.abort()
+  }, [open, settings])
 
   // Google/OpenAI verbieten das Einbetten ihrer Seiten. In eingebetteten Vorschauen darf der Link daher
   // nie im aktuellen Rahmen landen: immer einen neuen Tab öffnen, sonst die Adresse anzeigen.
@@ -41,22 +48,35 @@ export function ModeSheet({ open, onboarding, settings, depth, onDepthChange, on
     catch (error) { console.error('Kopieren nicht möglich:', error) }
   }
 
-  const update = (patch: Partial<AiSettings>) => { setDraft(d => ({ ...d, ...patch })); setStatus(null) }
+  const update = (patch: Partial<AiSettings>) => {
+    checkRef.current?.abort()
+    checkRef.current = null
+    setChecking(false)
+    setDraft(d => ({ ...d, ...patch }))
+    setStatus(null)
+  }
   const keyMode = draft.mode === 'key'
   const hasKey = draft.apiKey.trim().length > 0
 
   const check = async (): Promise<AiSettings | null> => {
+    checkRef.current?.abort()
+    const request = new AbortController()
+    checkRef.current = request
     setChecking(true); setStatus(null)
     try {
-      const model = await verifyKey(draft.provider, draft.apiKey)
+      const model = await verifyKey(draft.provider, draft.apiKey, request.signal)
+      if (request.signal.aborted || checkRef.current !== request) return null
       const next = { ...draft, apiKey: draft.apiKey.trim(), model: draft.model.trim() || model }
       setDraft(next)
       setStatus({ ok: true, text: `Schlüssel funktioniert · Modell ${next.model}` })
       return next
     } catch (error) {
+      if (request.signal.aborted) return null
       setStatus({ ok: false, text: error instanceof Error ? error.message : 'Der Schlüssel konnte nicht geprüft werden.' })
       return null
-    } finally { setChecking(false) }
+    } finally {
+      if (checkRef.current === request) { checkRef.current = null; setChecking(false) }
+    }
   }
 
   const confirm = async () => {
@@ -159,10 +179,12 @@ export function ModeSheet({ open, onboarding, settings, depth, onDepthChange, on
             {[10, 14, 18, 22, 26].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>}
+        <div className="zl-sheet-footer">
         <Button size="lg" className="zl-primary w-full" disabled={checking || (keyMode && !hasKey)} onClick={confirm}>
           {checking && <Loader2 className="size-4 mr-2 animate-spin" />}
           {keyMode ? (onboarding ? 'Mit KI starten' : 'Speichern') : (onboarding ? 'Ohne KI starten' : 'Fertig')}
         </Button>
+        </div>
       </DialogContent>
     </Dialog>
   )

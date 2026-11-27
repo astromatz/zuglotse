@@ -14,7 +14,6 @@ export function EvalBar({ percent, isAnalyzing }: EvalBarProps) {
   return (
     <div
       className="flex flex-col w-3 self-stretch rounded-full overflow-hidden bg-gray-800 ring-1 ring-black/20 shadow-inner"
-      style={{ minHeight: 180 }}
       role="meter"
       aria-label="Stellungsbewertung"
       aria-valuenow={Math.round(clampedPercent)}

@@ -29,7 +29,10 @@ jobs:
           node-version: 22
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps
+        run: npm install
+
+      - name: Test Position and Runtime Logic
+        run: npm test
 
       - name: Setup GitHub Pages Configuration
         uses: actions/configure-pages@v5
